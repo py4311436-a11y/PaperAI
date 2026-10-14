@@ -1,0 +1,208 @@
+/* PaperAI PoC — deliberately minimal UI per spec section 10.
+ *
+ * CRITICAL (learned the hard way):
+ * Do NOT hand-write .pdfViewer / .textLayer / .annotationEditorLayer rules.
+ * PDF.js 6.4.299 drives pointer-events for the AnnotationEditor purely through
+ * class toggles (.disabled / .highlighting / .inkEditing / .drawing) that are
+ * paired with the official stylesheet. Overriding them breaks
+ * DrawingEditor._getDrawingTarget(), which does `return event.target` —
+ * if a child span captures the event, Ink creation dies silently.
+ * Everything viewer-related is inherited verbatim from pdf_viewer.css.
+ */
+@import "pdfjs-dist/web/pdf_viewer.css";
+
+:root {
+  --bar-h: 40px;
+  --status-h: 26px;
+  --border: #d0d7de;
+  --accent: #0969da;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: #1f2328;
+  background: #f6f8fa;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: relative;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--bar-h);
+  padding: 0 8px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  overflow-x: auto;
+}
+
+#toolbar button {
+  padding: 5px 11px;
+  font-size: 13px;
+  color: #1f2328;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#toolbar button:hover {
+  background: #f3f4f6;
+}
+
+#toolbar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+#toolbar .sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+  flex: 0 0 auto;
+}
+
+#zoom-label,
+#page-indicator {
+  font-size: 12px;
+  color: #656d76;
+  min-width: 52px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: var(--status-h);
+  padding: 0 10px;
+  font-size: 12px;
+  color: #656d76;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+#status-bar .grow {
+  flex: 1 1 auto;
+}
+
+#status-sel {
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* PDFViewer 6.x hard-requires the container to be position:absolute
+   (checked at construction time when container.offsetParent is non-null). */
+#viewerContainer {
+  position: absolute;
+  top: calc(var(--bar-h) + var(--status-h));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: auto;
+  outline: none;
+  background: #525659;
+}
+
+#viewer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ------------------------------------------------------------------ toast
+   Scoped to #toast only — never touches PDF.js class names. */
+#toast {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: 70vw;
+  padding: 9px 16px;
+  font-size: 13px;
+  color: #fff;
+  background: #1f2328;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  z-index: 9999;
+}
+#toast.error {
+  background: #cf222e;
+}
+#toast.success {
+  background: #1a7f37;
+}
+#toast.warn {
+  background: #9a6700;
+}
+
+/* ------------------------------------------------------------- dirty modal */
+#dirty-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 20, 25, 0.42);
+  z-index: 10000;
+}
+#dirty-modal .dm-card {
+  width: 380px;
+  padding: 20px 22px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+}
+#dirty-modal .dm-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+#dirty-modal .dm-text {
+  color: #57606a;
+  line-height: 1.6;
+  word-break: break-all;
+}
+#dirty-modal .dm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+#dirty-modal button {
+  padding: 6px 14px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+#dirty-modal button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}

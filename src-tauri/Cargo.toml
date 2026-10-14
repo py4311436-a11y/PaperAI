@@ -1,0 +1,30 @@
+[package]
+name = "paperai"
+version = "0.2.0"
+description = "PaperAI — Read · Annotate · Ask (Windows PDF reader)"
+authors = ["PaperAI"]
+edition = "2021"
+
+[lib]
+name = "paperai_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.3", features = [] }
+tauri-plugin-single-instance = "2.5.3"
+tauri-plugin-dialog = "2.8.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+base64 = "0.22"
+sha2 = "0.10"
+
+[profile.release]
+# LTO left off deliberately: it roughly quadruples build time and this is a
+# PoC. Enable for a real shipping build.
+codegen-units = 16
+opt-level = "s"
+panic = "abort"
+strip = true

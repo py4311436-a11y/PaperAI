@@ -1,0 +1,6 @@
+﻿CARGO_HOME          : (not set)
+RUSTUP_HOME         : (not set)
+RUSTUP_TOOLCHAIN    : (not set)
+CARGO_TARGET_DIR    : (not set)
+PATH has cargo bin: False
+rust-analyzer stub exists: False

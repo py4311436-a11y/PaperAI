@@ -1,0 +1,92 @@
+/* Ink-critical: replicate the OFFICIAL pdf_viewer.css rules verbatim.
+ * Do not override these — DrawingEditor relies on event.target being the
+ * annotationEditorLayer itself, which only holds when .textLayer and
+ * .canvasWrapper do NOT capture the pointer.
+ */
+.pdfViewer .page {
+  --scale-factor: 1;
+  --total-scale-factor: 1;
+  position: relative;
+  overflow: visible;
+  margin: 0 auto;
+  border: 9px solid transparent;
+  background-clip: content-box;
+}
+
+.pdfViewer .canvasWrapper {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none; /* official: none */
+  border: 0;
+}
+
+.pdfViewer .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 2;
+}
+
+/* OFFICIAL: pointer-events depends on mode */
+.pdfViewer .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+
+.pdfViewer .textLayer .hasMarkedContent {
+  /* official marker classes */
+}
+
+.pdfViewer .textLayer .highlight {
+  background-color: rgba(255, 255, 0, 0.25);
+}
+
+.pdfViewer .annotationEditorLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none; /* base: none — toggled by toggleAnnotationLayerPointerEvents */
+  transform-origin: 0 0;
+}
+
+.pdfViewer .annotationEditorLayer :is(canvas, svg) {
+  position: absolute;
+  transform-origin: 0 0;
+  pointer-events: none; /* editors themselves don't capture; layer does */
+}
+
+.pdfViewer .annotationEditorLayer .editorLayer canvas {
+  pointer-events: none;
+}
+
+/* When in editing modes, the official viewer toggles these via JS classes.
+ * The layer itself must receive pointer events so that
+ * DrawingEditor._getDrawingTarget() returns the layer div.
+ */
+.pdfViewer .annotationEditorLayer.inkEditing,
+.pdfViewer .annotationEditorLayer.highlightEditing,
+.pdfViewer .annotationEditorLayer.stampEditing,
+.pdfViewer .annotationEditorLayer.signatureEditing,
+.pdfViewer .annotationEditorLayer.freetextEditing {
+  pointer-events: auto;
+}
+
+/* In NON-editing mode text must be selectable */
+.pdfViewer .textLayer.nonEditing :is(span, br) {
+  cursor: text;
+}
+
+/* Official: hide pointer target during text selection */
+.pdfViewer .annotationEditorLayer.disabled {
+  pointer-events: none;
+}

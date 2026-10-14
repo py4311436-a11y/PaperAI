@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PaperAI</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <button id="btn-open" data-testid="open" title="打开 PDF">Open</button>
+        <span class="sep"></span>
+        <button id="btn-select" data-testid="select" class="tool active" title="选择文本 / 阅读">Select</button>
+        <button id="btn-highlight" data-testid="highlight" class="tool" title="高亮选中文本 (先选文字再点)">Highlight</button>
+        <button id="btn-ink" data-testid="ink" class="tool" title="自由画笔">Draw</button>
+        <button id="btn-erase" data-testid="erase" title="删除选中的批注 (真实删除，非白笔覆盖)">Erase</button>
+        <span class="sep"></span>
+        <button id="btn-save" data-testid="save" title="保存到当前文件 (Ctrl+S)">Save</button>
+        <button id="btn-save-as" data-testid="save-as" title="另存为新文件">Save As</button>
+        <span class="sep"></span>
+        <button id="btn-zoom-out" data-testid="zoom-out">Zoom -</button>
+        <span id="zoom-label">100%</span>
+        <button id="btn-zoom-in" data-testid="zoom-in">Zoom +</button>
+        <button id="btn-fit-width" data-testid="fit-width">Fit Width</button>
+        <button id="btn-fit-page" data-testid="fit-page">Fit Page</button>
+        <span class="sep"></span>
+        <span id="page-indicator" data-testid="page">- / -</span>
+      </header>
+
+      <div id="status-bar">
+        <span id="status-file" data-testid="status-file">未打开文件</span>
+        <span class="grow"></span>
+        <span id="status-dirty" data-testid="status-dirty"></span>
+        <span id="status-annot" data-testid="status-annot">批注: 0</span>
+        <span id="status-sel" data-testid="status-sel"></span>
+      </div>
+
+      <div id="viewerContainer">
+        <div id="viewer"></div>
+      </div>
+
+      <div id="toast" data-testid="toast"></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

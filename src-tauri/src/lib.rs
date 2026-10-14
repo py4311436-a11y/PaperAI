@@ -1,0 +1,120 @@
+//! PaperAI desktop backend.
+
+mod commands;
+mod error;
+mod paths;
+mod save_service;
+
+use std::sync::Mutex;
+
+use error::AppError;
+use paths::resolve_pdf_path;
+use tauri::{Emitter, Manager, RunEvent};
+
+/// Files handed to us by the OS before the WebView was ready.
+///
+/// Both the startup argv and the single-instance callback can fire while the
+/// frontend is still booting; events emitted at that point are lost. The
+/// frontend drains this queue once it signals readiness.
+pub struct PendingFiles(Mutex<Vec<String>>);
+
+impl PendingFiles {
+    fn push(&self, paths: Vec<String>) {
+        if paths.is_empty() {
+            return;
+        }
+        if let Ok(mut g) = self.0.lock() {
+            for p in paths {
+                if !g.contains(&p) {
+                    g.push(p);
+                }
+            }
+        }
+    }
+
+    fn take(&self) -> Vec<String> {
+        self.0.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default()
+    }
+}
+
+/// Event name the frontend listens to for "another instance asked us to open
+/// these files".
+pub const OPEN_FILES_EVENT: &str = "paperai://open-files";
+
+/// Extract PDF paths from a raw argv slice (argv[0] is the executable).
+fn pdf_paths_from_argv(argv: &[String], cwd: Option<&std::path::Path>) -> Vec<String> {
+    argv.iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--") && !a.starts_with('-'))
+        .filter_map(|a| resolve_pdf_path(a, cwd).ok())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
+}
+
+fn focus_main_window(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        // Windows refuses to steal foreground focus in many cases; we do what
+        // the platform allows and record the real behaviour in the report.
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let startup: Vec<String> = {
+        let argv: Vec<String> = std::env::args_os().map(|s| s.to_string_lossy().into_owned()).collect();
+        let cwd = std::env::current_dir().ok();
+        pdf_paths_from_argv(&argv, cwd.as_deref())
+    };
+
+    let startup_for_setup = startup.clone();
+
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let found = pdf_paths_from_argv(&argv, Some(std::path::Path::new(&cwd)));
+            if found.is_empty() {
+                focus_main_window(app);
+                return;
+            }
+            eprintln!("[PaperAI] single-instance forwarded: {:?}", found);
+            app.state::<PendingFiles>().push(found.clone());
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.emit(OPEN_FILES_EVENT, found);
+            }
+            focus_main_window(app);
+        }))
+        .manage(PendingFiles(Mutex::new(startup.clone())))
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::open_pdf,
+            commands::read_pdf_file,
+            commands::stat_path,
+            commands::sha256_of,
+            commands::save_document,
+            commands::take_pending_files,
+        ])
+        .setup(move |_app| {
+            if !startup_for_setup.is_empty() {
+                eprintln!("[PaperAI] startup argv files: {:?}", startup_for_setup);
+            }
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building PaperAI");
+
+    app.run(|_handle, event| {
+        if let RunEvent::ExitRequested { .. } = event {
+            // Dirty-state protection is handled in the frontend, which can
+            // veto the close via the window API.
+        }
+    });
+}
+
+/// Helper used by tests/docs: report a friendly error for a bad path.
+#[allow(dead_code)]
+fn describe(err: &AppError) -> String {
+    format!("{}: {}", err.code, err.message)
+}

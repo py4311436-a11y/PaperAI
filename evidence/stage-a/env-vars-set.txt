@@ -1,0 +1,4 @@
+﻿set CARGO_HOME / RUSTUP_HOME / CARGO_TARGET_DIR (User)
+appended D:\.cargo\bin to USER Path (system Path untouched)
+verify CARGO_HOME=D:\.cargo
+verify RUSTUP_HOME=D:\.rustup

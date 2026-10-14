@@ -1,0 +1,29 @@
+{
+  "name": "paperai-poc",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "PaperAI — Read · Annotate · Ask. Windows desktop PDF reader (Tauri 2 + PDF.js)",
+  "scripts": {
+    "sync:assets": "node scripts/sync-pdfjs-assets.mjs",
+    "dev": "npm run sync:assets && vite",
+    "build": "npm run sync:assets && tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "icon": "node scripts/make-icon.mjs && tauri icon assets/icon-source.png"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.3",
+    "@tauri-apps/plugin-dialog": "2.8.2",
+    "pdfjs-dist": "6.4.299"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.2",
+    "puppeteer-core": "^24.10.2",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  }
+}
