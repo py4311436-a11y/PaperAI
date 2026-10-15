@@ -21,7 +21,12 @@ pub const MAX_PDF_BYTES: u64 = 512 * 1024 * 1024;
 pub fn clean_arg(raw: &str) -> String {
     let t = raw.trim();
     let t = t.trim_matches('"').trim();
-    t.replace('/', "\\")
+    let t = t.replace('/', "\\");
+    // `canonicalize` on Windows returns the \\?\ verbatim form; strip it so the
+    // path we hand back to the UI / save layer is a normal path.
+    t.strip_prefix(r"\\?\UNC\").map(|_| t.to_string()).unwrap_or_else(|| {
+        t.strip_prefix(r"\\?\").unwrap_or(&t).to_string()
+    })
 }
 
 /// Resolve `raw` into an absolute, existing, PDF file path.
@@ -57,6 +62,7 @@ pub fn resolve_pdf_path(raw: &str, cwd: Option<&Path>) -> AppResult<PathBuf> {
     let canonical = absolute
         .canonicalize()
         .map_err(|_| AppError::new(codes::PATH_NOT_FOUND, format!("文件不存在: {}", cleaned)))?;
+    let canonical = PathBuf::from(clean_arg(&canonical.to_string_lossy()));
 
     if !canonical.is_file() {
         return Err(AppError::new(codes::PATH_NOT_FILE, format!("不是文件: {}", cleaned)));

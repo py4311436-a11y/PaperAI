@@ -41,14 +41,43 @@ impl PendingFiles {
 /// these files".
 pub const OPEN_FILES_EVENT: &str = "paperai://open-files";
 
+/// Append one line to the app's audit log.
+///
+/// Release builds use the Windows GUI subsystem, so `println!` is invisible;
+/// a log file is the only way to verify what the shell actually handed us.
+/// Never logs document content — only paths and lifecycle events.
+pub fn audit(msg: &str) {
+    use std::io::Write;
+    let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into());
+    let dir = std::path::Path::new(&base).join("PaperAI");
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("paperai.log"))
+    {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 /// Extract PDF paths from a raw argv slice (argv[0] is the executable).
 fn pdf_paths_from_argv(argv: &[String], cwd: Option<&std::path::Path>) -> Vec<String> {
-    argv.iter()
-        .skip(1)
-        .filter(|a| !a.starts_with("--") && !a.starts_with('-'))
-        .filter_map(|a| resolve_pdf_path(a, cwd).ok())
-        .map(|p| p.to_string_lossy().to_string())
-        .collect()
+    let mut out = Vec::new();
+    audit(&format!("argv = {:?}", argv));
+    for a in argv.iter().skip(1) {
+        if a.starts_with("--") || a.starts_with('-') {
+            continue;
+        }
+        match resolve_pdf_path(a, cwd) {
+            Ok(p) => out.push(p.to_string_lossy().to_string()),
+            Err(e) => audit(&format!("  rejected {:?}: {}", a, e)),
+        }
+    }
+    out
 }
 
 fn focus_main_window(app: &tauri::AppHandle) {
@@ -75,6 +104,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             let found = pdf_paths_from_argv(&argv, Some(std::path::Path::new(&cwd)));
+            audit(&format!("single-instance: {} file(s) forwarded", found.len()));
             if found.is_empty() {
                 focus_main_window(app);
                 return;

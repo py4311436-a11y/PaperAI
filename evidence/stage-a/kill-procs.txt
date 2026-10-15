@@ -1,0 +1,7 @@
+﻿killed 31776
+killed 35872
+killed 27900
+killed 21488
+killed 6504
+--- remaining ---
+15052,31688,38984,39056,39376,41756

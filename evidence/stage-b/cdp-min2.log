@@ -1,0 +1,5 @@
+t+2.1s browser endpoint up
+t+3.6s page target: http://tauri.localhost/
+t+3.6s connected, Runtime+Page enabled
+t+3.6s poll 0: href=about:blank
+t+124.6s FAILED: CDP Runtime.evaluate timed out

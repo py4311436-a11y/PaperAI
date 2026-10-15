@@ -1,0 +1,32 @@
+arg: D:\AIreader\PaperAI-PoC\test-fixtures\dual\IEEE 双栏 论文 副本.pdf
+STATE: {
+  "numPages": 6,
+  "currentPath": "\\\\?\\D:\\AIreader\\PaperAI-PoC\\test-fixtures\\dual\\IEEE 双栏 论文 副本.pdf",
+  "status": "未打开文件 — 点 Open 或拖入 PDF",
+  "toast": "已打开 IEEE 双栏 论文 副本.pdf",
+  "title": "PaperAI — IEEE 双栏 论文 副本.pdf",
+  "pages": 6,
+  "canvases": 2,
+  "logs": [
+    {
+      "t": 1792039498218,
+      "level": "success",
+      "msg": "PDF.js 6.4.299 viewer initialised"
+    },
+    {
+      "t": 1792039498352,
+      "level": "info",
+      "msg": "AnnotationEditorUIManager acquired"
+    },
+    {
+      "t": 1792039498362,
+      "level": "info",
+      "msg": "Tool -> select (mode=0)"
+    },
+    {
+      "t": 1792039498362,
+      "level": "success",
+      "msg": "Opened \"IEEE 双栏 论文 副本.pdf\" — 6 page(s)"
+    }
+  ]
+}

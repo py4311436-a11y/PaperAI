@@ -41,6 +41,9 @@ const adapter = new PdfjsAdapter({
   viewer: viewerEl,
   diagnostics,
 });
+// Single source of truth for the dirty flag: the adapter knows when an
+// annotation is created or removed, the shell only reflects it.
+adapter.onDirtyChange = (d) => setDirty(d);
 
 // ---------------------------------------------------------------- state
 let currentPath: string | null = null;
@@ -53,7 +56,29 @@ function setDirty(v: boolean) {
   dirty = v;
   statusDirty.textContent = v ? "● 未保存" : "";
   statusDirty.style.color = v ? "#d1242f" : "";
-  document.title = `PaperAI${currentName ? " — " + currentName : ""}${v ? " *" : ""}`;
+  syncTitle();
+}
+
+/**
+ * Mirror the open document into the native window title.
+ *
+ * Besides being good UX, this makes the OS-level state observable: the
+ * automated desktop tests read the native title to prove which PDF the real
+ * installed app is showing (no way to reach into the WebView otherwise).
+ */
+async function syncTitle() {
+  // "· ready" is a deliberate marker: it distinguishes "frontend booted" from
+  // the shell's static window title, which lets automated runs confirm the
+  // WebView actually executed our bundle.
+  const base = `PaperAI${currentName ? " — " + currentName : " · ready"}${dirty ? " *" : ""}`;
+  document.title = base;
+  if (!bridge.isTauri) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setTitle(base);
+  } catch {
+    /* capability missing — cosmetic only */
+  }
 }
 
 function toast(msg: string, kind: "info" | "error" | "success" | "warn" = "info") {
@@ -75,10 +100,11 @@ async function openPath(rawPath: string): Promise<boolean> {
     currentPath = info.path;
     currentName = info.name;
     statusFile.textContent = `${info.name} — ${adapter.numPages} 页`;
-    setDirty(false);
+    adapter.markClean();
     toast(`已打开 ${info.name}`, "success");
     return true;
   } catch (e) {
+    diagnostics.log("error", `openPath failed: ${String(e)} :: ${e instanceof Error ? e.stack : "no stack"}`);
     const msg = String(e);
     statusFile.textContent = `打开失败: ${msg}`;
     toast(`打开失败: ${msg}`, "error");
@@ -134,7 +160,7 @@ async function saveTo(target: string | null): Promise<boolean> {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setDirty(false);
+      adapter.markClean();
       toast(`已导出 ${bytes.byteLength} 字节`, "success");
       return true;
     }
@@ -152,7 +178,7 @@ async function saveTo(target: string | null): Promise<boolean> {
     currentPath = res.target;
     currentName = res.target.replace(/^.*[\\/]/, "");
     statusFile.textContent = `${currentName} — ${adapter.numPages} 页`;
-    setDirty(false);
+    adapter.markClean();
     lastSavedBytes = bytes;
     lastVerify = report;
     toast(`已保存 ${res.bytes} 字节 (SHA256 ${res.sha256.slice(0, 12)}…)`, "success");
@@ -191,7 +217,16 @@ $("#btn-highlight").addEventListener("click", async () => {
   else toast("请先在选择模式下选中一段文字", "warn");
 });
 $("#btn-ink").addEventListener("click", () => void setTool("ink"));
-$("#btn-erase").addEventListener("click", () => {
+$("#btn-erase").addEventListener("click", async () => {
+  // PDF.js only makes the editor layer hit-testable while an editing mode is
+  // active (`.annotationEditorLayer.disabled { pointer-events: none }` and
+  // `.highlightEditor { pointer-events: none }`). So selecting an annotation
+  // we created ourselves requires entering an editing mode first.
+  if (!adapter.debugState().hasSelection) {
+    await setTool("ink");
+    toast("已进入批注编辑模式：点击要删除的批注，再点 Erase", "info");
+    return;
+  }
   const ok = adapter.deleteSelected();
   if (ok) setDirty(true);
   else toast("没有选中的批注可删除", "info");
@@ -207,21 +242,27 @@ $("#btn-zoom-out").addEventListener("click", () => {
   zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
 });
 $("#btn-fit-width").addEventListener("click", () => {
-  adapter.fitWidth();
+  void adapter.fitWidth();
   zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
 });
 $("#btn-fit-page").addEventListener("click", () => {
-  adapter.fitPage();
+  void adapter.fitPage();
   zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
 });
 
-adapter.eventBusInstance.on("pagechanging", (e: { pageNumber: number; pagesCount: number }) => {
-  pageIndicator.textContent = `${e.pageNumber} / ${e.pagesCount}`;
-});
-adapter.eventBusInstance.on("pagesinit", (e: { pagesCount: number }) => {
-  pageIndicator.textContent = `1 / ${e.pagesCount}`;
-  zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
-});
+// NOTE: these must be registered from boot(), AFTER adapter.init() — at module
+// scope the EventBus does not exist yet and `.on` would throw, killing the
+// whole module before `window.__paperai` is ever installed.
+function wireViewerEvents() {
+  const bus = adapter.eventBusInstance;
+  bus.on("pagechanging", (e: { pageNumber: number; pagesCount: number }) => {
+    pageIndicator.textContent = `${e.pageNumber} / ${e.pagesCount}`;
+  });
+  bus.on("pagesinit", (e: { pagesCount: number }) => {
+    pageIndicator.textContent = `1 / ${e.pagesCount}`;
+    zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
+  });
+}
 
 let raf = 0;
 viewerContainer.addEventListener("mouseup", () => {
@@ -258,14 +299,34 @@ bridge.onOpenFiles((paths) => {
 });
 
 // ---------------------------------------------------------------- boot
+/**
+ * Surface start-up failures through the NATIVE window title.
+ *
+ * In headless/automated environments we cannot always reach the WebView dev
+ * console, but the OS window title is observable (Get-Process). Any uncaught
+ * error during boot therefore ends up readable from outside.
+ */
+function reportFatal(where: string, err: unknown) {
+  const msg = `ERR[${where}] ${String(err).slice(0, 160)}`;
+  document.title = msg;
+  if (!bridge.isTauri) return;
+  void import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(msg))
+    .catch(() => undefined);
+}
+
+window.addEventListener("error", (e) => reportFatal("error", (e as ErrorEvent).message ?? e));
+window.addEventListener("unhandledrejection", (e) => reportFatal("rejection", (e as PromiseRejectionEvent).reason));
+
 async function boot() {
   await adapter.init();
+  wireViewerEvents();
 
   // Browser-only fallback so the automated suite can run without Tauri.
   if (!bridge.isTauri) installBrowserFileFallback();
 
   await drainPendingFiles();
-  statusFile.textContent = "未打开文件 — 点 Open 或拖入 PDF";
+  if (!currentPath) statusFile.textContent = "未打开文件 — 点 Open 或拖入 PDF";
   (window as unknown as { __paperaiReady: boolean }).__paperaiReady = true;
   console.log(`[PaperAI] ready — PDF.js ${PDFJS_VERSION}, tauri=${bridge.isTauri}`);
 }
@@ -284,12 +345,12 @@ function installBrowserFileFallback() {
     currentName = f.name;
     currentPath = f.name;
     statusFile.textContent = `${f.name} — ${adapter.numPages} 页`;
-    setDirty(false);
+    adapter.markClean();
   });
   (window as unknown as { __paperaiPickFile: () => void }).__paperaiPickFile = () => input.click();
 }
 
-void boot();
+boot().catch((e) => reportFatal("boot", e));
 
 // ---------------------------------------------------------------- test API
 Object.assign(window as unknown as Record<string, unknown>, {
@@ -331,13 +392,13 @@ Object.assign(window as unknown as Record<string, unknown>, {
       currentName = name;
       currentPath = null;
       statusFile.textContent = `${name} — ${adapter.numPages} 页`;
-      setDirty(false);
+      adapter.markClean();
     },
     loadByUrl: async (url: string, name: string) => {
       await adapter.open(url, name);
       currentName = name;
       statusFile.textContent = `${name} — ${adapter.numPages} 页`;
-      setDirty(false);
+      adapter.markClean();
     },
     setTool,
     setScale: (v: number) => {
@@ -345,11 +406,11 @@ Object.assign(window as unknown as Record<string, unknown>, {
       zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
     },
     fitWidth: () => {
-      adapter.fitWidth();
+      void adapter.fitWidth();
       zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
     },
     fitPage: () => {
-      adapter.fitPage();
+      void adapter.fitPage();
       zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
     },
     highlight: () => adapter.highlightSelection(),
@@ -368,6 +429,10 @@ Object.assign(window as unknown as Record<string, unknown>, {
       return lastSavedBytes;
     },
     getSelection: () => window.getSelection()?.toString() ?? "",
+    debugState: () => adapter.debugState(),
+    /** Direct access to the Rust save service (used by the save-safety suite). */
+    saveRequest: (req: bridge.SaveRequest) => bridge.saveDocument(req),
+    saveAsDialog: () => bridge.pickSaveTarget(currentName || "document.pdf"),
     getSpanRects: (needle: string, limit?: number) => adapter.getSpanRects(needle, limit),
     __verifyLoaded: async () => {
       const bytes = await adapter.serialize();

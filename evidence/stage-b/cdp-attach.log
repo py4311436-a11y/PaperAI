@@ -1,0 +1,4 @@
+browser ws: ws://127.0.0.1:9350/devtools/browser/7a348ce1-2d4c-4751-9213-9478816308e5
+page ws   : ws://127.0.0.1:9350/devtools/page/219F0AEA6E8D49643AFBFBD2B5FA75EB http://tauri.localhost/
+targets(): browser: | page:http://tauri.localhost/
+FAILED: Protocol error (Target.getBrowserContexts): Not allowed

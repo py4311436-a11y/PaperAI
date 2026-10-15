@@ -1,0 +1,11 @@
+[console.debug] [vite] connecting...
+[console.debug] [vite] connected.
+[pageerror] TypeError: Cannot read properties of undefined (reading 'on')
+[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)
+info: {
+  "paperai": "undefined",
+  "ready": null,
+  "title": "PaperAI",
+  "bodyLen": 1811,
+  "logs": []
+}

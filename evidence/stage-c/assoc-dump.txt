@@ -1,0 +1,27 @@
+﻿installer exit=0
+--- HKCU\SOFTWARE\Classes entries matching pdf/PaperAI ---
+.pdf => PDF Document
+.pdfwpsshellnew => KWPS.PDF.9
+.tppdf => KWPS.TaiPingSecPDF.9
+ChromiumPDF => Chromium PDF Document
+DoubaoPDF.47ACBMMQXJB6OY7EDG2CWUFWKQ => Doubao PDF Document
+KPDF.Application => WPS PDF Application Class
+KPDF.Application.9 => WPS PDF Application Class
+KPDF.Document => WPS Pdf Document
+KPDF.Document.9 => WPS Pdf Document
+ksobak.pdf => KWPS.PDF.9
+ksopdf => PDF Protocol
+KWPS.PDF.9 => WPS PDF 文档
+KWPS.PDF.9.ksobak => WPS PDF 文档
+MiKTeX.pdf.2.9 => PDF File
+pdf => 
+PDF Document => Portable Document Format
+QuarkHTM.pdf => 
+workbuddyai.pdf => WorkBuddy AI Document
+--- Applications\PaperAI.exe present? ---
+False
+--- .pdf subkeys ---
+KWPS.PDF.9
+OpenWithList
+OpenWithProgids
+ShellEx

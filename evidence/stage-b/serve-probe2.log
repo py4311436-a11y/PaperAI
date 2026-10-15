@@ -1,0 +1,9 @@
+t+0.0s serving D:\AIreader\PaperAI-PoC\dist at http://127.0.0.1:8099/
+t+0.6s target: http://127.0.0.1:8099/
+t+0.6s href = "http://127.0.0.1:8099/"
+t+0.6s paperai = "object"
+t+0.6s ready = true
+t+0.6s isTauri = false
+t+0.6s pdfjs = "6.4.299"
+t+0.6s title = "PaperAI"
+t+0.6s logs = "success:PDF.js 6.4.299 viewer initialised"

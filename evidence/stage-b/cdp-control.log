@@ -1,0 +1,8 @@
+t+0.7s endpoint up
+t+0.7s target: file:///D:/AIreader/PaperAI-PoC/evidence/stage-b/control.html
+t+0.7s connected
+t+0.8s href = "file:///D:/AIreader/PaperAI-PoC/evidence/stage-b/control.html"
+t+0.8s title = "ControlPage"
+t+0.8s __ok = 42
+t+0.8s h1 = "hello-cdp"
+t+0.8s screenshot bytes: 9471

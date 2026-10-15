@@ -1,0 +1,10 @@
+t+2.1s browser endpoint up
+t+3.6s page target: http://tauri.localhost/
+t+3.6s connected, Runtime+Page enabled
+t+3.6s 1+1 = 2
+t+3.7s location = "about:blank"
+t+3.7s readyState = "complete"
+t+3.7s title = ""
+t+3.7s bodyLen = 0
+t+3.7s paperai = "undefined"
+t+123.7s screenshot FAILED: CDP Page.captureScreenshot timed out

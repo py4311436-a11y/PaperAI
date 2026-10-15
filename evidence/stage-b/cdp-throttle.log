@@ -1,0 +1,10 @@
+t+0.9s connected
+t+1.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+2.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+3.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+4.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+5.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+6.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+7.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+8.5s eval: http://tauri.localhost/ | title=PaperAI | paperai=object | ready=true
+t+9.5s RENDERER RESPONSIVE

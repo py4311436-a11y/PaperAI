@@ -1,0 +1,49 @@
+  rAF ticks in 2s: 5 | screencast frames so far: 1
+--- opening pdf ---
+  [resp] 200 http://ipc.localhost/open_pdf
+  [resp] 200 http://ipc.localhost/open_pdf
+  [resp] 200 http://ipc.localhost/read_pdf_file
+  [resp] 200 http://ipc.localhost/read_pdf_file
+  [console.log] [PaperAI] AnnotationEditorUIManager acquired
+  [console.log] [PaperAI] Tool -> select (mode=0)
+  [console.log] [PaperAI] Opened "PDF-A-single.pdf" — 23 page(s)
+  [resp] 200 http://tauri.localhost/assets/window-D-moA_Rr.js
+  [resp] 200 http://ipc.localhost/plugin%3Awindow%7Cset_title
+  [resp] 200 http://ipc.localhost/plugin%3Awindow%7Cset_title
+{
+  "numPages": 23,
+  "viewport": {
+    "innerW": 1280,
+    "innerH": 700,
+    "dpr": 1.5
+  },
+  "sizes": {
+    "container": {
+      "w": 1280,
+      "h": 634
+    },
+    "viewer": {
+      "w": 1280,
+      "h": 0
+    },
+    "firstPage": {
+      "w": 0,
+      "h": 0
+    }
+  },
+  "scale": 1,
+  "counts": {
+    "#viewer": 1,
+    "#viewer > *": 23,
+    ".page": 23,
+    ".pdfViewer": 0,
+    ".textLayer": 0,
+    ".textLayer span": 0,
+    "canvas": 0
+  },
+  "viewerClasses": "",
+  "viewerParentClasses": "",
+  "firstPageTag": "DIV.page",
+  "firstPageChildren": [],
+  "sampleSpanText": null
+}

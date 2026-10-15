@@ -1,0 +1,21 @@
+t+1.8s browser ws connected
+t+1.8s   [target] page about:blank
+t+3.8s page target: 45DDB1DEDDCE5DA25D6BBA1597B02B70
+t+3.8s   [target] page http://tauri.localhost/
+t+3.8s attached session: 6C5D0FC4452C83667DEB13EA798B85FF
+t+3.9s eval: about:blank | title= | paperai=undefined
+t+4.3s   [resp 200] http://tauri.localhost/
+t+4.3s   [resp 200] http://tauri.localhost/assets/index-OVtmgRy8.css
+t+4.5s   [resp 200] http://tauri.localhost/assets/index-C1XT4Rsq.js
+t+4.6s   [resp 200] http://ipc.localhost/plugin%3Aevent%7Clisten
+t+4.6s   [resp 200] http://ipc.localhost/plugin%3Aevent%7Clisten
+t+4.6s   [resp 200] http://tauri.localhost/favicon.ico
+t+34.9s eval failed: Runtime.evaluate timeout
+t+65.9s eval failed: Runtime.evaluate timeout
+t+96.9s eval failed: Runtime.evaluate timeout
+t+127.9s eval failed: Runtime.evaluate timeout
+t+158.9s eval failed: Runtime.evaluate timeout
+t+190.0s eval failed: Runtime.evaluate timeout
+t+221.0s eval failed: Runtime.evaluate timeout
+t+252.0s eval failed: Runtime.evaluate timeout
+t+283.0s eval failed: Runtime.evaluate timeout

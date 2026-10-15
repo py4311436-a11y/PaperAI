@@ -1,0 +1,17 @@
+{
+  "numPages": 23,
+  "counts": {
+    "#viewer": 1,
+    "#viewer > *": 23,
+    ".page": 23,
+    ".pdfViewer": 0,
+    ".textLayer": 0,
+    ".textLayer span": 0,
+    "canvas": 0
+  },
+  "viewerClasses": "",
+  "viewerParentClasses": "",
+  "firstPageTag": "DIV.page",
+  "firstPageChildren": [],
+  "sampleSpanText": null
+}

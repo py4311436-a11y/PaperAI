@@ -36,7 +36,12 @@
       </div>
 
       <div id="viewerContainer">
-        <div id="viewer"></div>
+        <!-- The `pdfViewer` class is REQUIRED: pdf_viewer.css defines
+             --total-scale-factor / --scale-round-x on `.pdfViewer .page`.
+             Without it the inline `round(down, var(--total-scale-factor) * Npx, ...)`
+             size PDF.js sets on each page is invalid, every .page collapses to
+             0x0, and nothing renders. PDFViewer does not add the class itself. -->
+        <div id="viewer" class="pdfViewer"></div>
       </div>
 
       <div id="toast" data-testid="toast"></div>

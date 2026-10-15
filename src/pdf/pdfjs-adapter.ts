@@ -159,6 +159,15 @@ export class PdfjsAdapter {
   private tool: ToolMode = "select";
   private dirtyFlag = false;
 
+  /** Fired whenever the dirty state changes so the shell can update the UI. */
+  onDirtyChange: ((dirty: boolean) => void) | null = null;
+
+  private markDirty(v: boolean) {
+    if (this.dirtyFlag === v) return;
+    this.dirtyFlag = v;
+    this.onDirtyChange?.(v);
+  }
+
   /** Name of the currently open document (for UI only). */
   documentName = "";
   /** Path/URL the document came from (never used to write back). */
@@ -197,7 +206,7 @@ export class PdfjsAdapter {
     );
 
     this.eventBus.on("annotationeditorstatechanged", () => {
-      this.dirtyFlag = true;
+      this.markDirty(true);
     });
 
     this.diagnostics.log("success", `PDF.js ${PDFJS_VERSION} viewer initialised`);
@@ -224,7 +233,7 @@ export class PdfjsAdapter {
   }
 
   markClean(): void {
-    this.dirtyFlag = false;
+    this.markDirty(false);
   }
 
   /* ---------------------------------------------------------------- Open -- */
@@ -248,6 +257,13 @@ export class PdfjsAdapter {
     // Triggers UIManager creation + the "annotationeditoruimanager" event.
     await this.pdfViewer.setDocument(doc);
     this.linkService.setViewer(this.pdfViewer);
+
+    // PDFViewer only sizes pages from #setScale. Two facts make this fiddly:
+    //   * the preset branch early-returns while `_currentPageNumber` is 0;
+    //   * setting `currentPageNumber` during open throws inside PDF.js
+    //     (`_setCurrentPageNumber` -> a page view whose `div` is not built yet).
+    // So we always drive the NUMERIC branch and compute fit ourselves.
+    await this.applyScale(await this.numericFitScale("page"));
 
     // Wait for the editor subsystem; without it Highlight/Ink cannot work.
     for (let i = 0; i < 60 && !this.uiManager; i++) {
@@ -332,7 +348,7 @@ export class PdfjsAdapter {
       await new Promise((r) => setTimeout(r, 200));
       this.uiManager.highlightSelection();
       await new Promise((r) => setTimeout(r, 350));
-      this.dirtyFlag = true;
+      this.markDirty(true);
       const n = this.annotationCount();
       this.diagnostics.log("success", `Highlight created — annotations=${n}`);
       return n;
@@ -366,6 +382,7 @@ export class PdfjsAdapter {
     try {
       const mgr = this.uiManager;
       if (!mgr) return;
+      const before = this.annotationCount();
 
       if (mgr.getMode?.() === AnnotationEditorType.INK) {
         for (let i = 0; i < 32; i++) {
@@ -375,6 +392,10 @@ export class PdfjsAdapter {
         mgr.currentLayer?.endDrawingSession?.();
       }
       mgr.currentLayer?.commitOrRemove?.();
+
+      // A committed stroke is a real document modification — the shell must
+      // learn about it even when the pointer never reached its mouseup handler.
+      if (this.annotationCount() > before) this.markDirty(true);
     } catch (e) {
       this.diagnostics.log("warn", `commitPendingInk: ${String(e)}`);
     }
@@ -385,10 +406,12 @@ export class PdfjsAdapter {
     try {
       const mgr = this.uiManager;
       if (!mgr) return false;
+      const hadSelection = !!mgr.hasSelection;
       if (typeof mgr.delete === "function") {
         mgr.delete();
-        this.dirtyFlag = true;
-        return true;
+        this.markDirty(true);
+        this.diagnostics.log("info", `delete() issued (hadSelection=${hadSelection})`);
+        return hadSelection;
       }
       return false;
     } catch (e) {
@@ -397,10 +420,23 @@ export class PdfjsAdapter {
     }
   }
 
+  /** Diagnostics snapshot used by the automated suites. */
+  debugState(): Record<string, unknown> {
+    const mgr = this.uiManager as any;
+    return {
+      mode: mgr?.getMode?.() ?? null,
+      hasSelection: !!mgr?.hasSelection,
+      hasSomethingToControl: !!mgr?.hasSomethingToControl?.(),
+      currentTool: this.tool,
+      isDirty: this.isDirty,
+      annotationCount: this.annotationCount(),
+    };
+  }
+
   undo(): void {
     try {
       this.uiManager?.undo?.();
-      this.dirtyFlag = true;
+      this.markDirty(true);
     } catch (e) {
       this.diagnostics.log("warn", `undo: ${String(e)}`);
     }
@@ -433,21 +469,53 @@ export class PdfjsAdapter {
 
   /* ------------------------------------------------------------------ Zoom */
 
+  /** Padding PDF.js uses when fitting (SCROLLBAR_PADDING / VERTICAL_PADDING). */
+  private static readonly H_PAD = 40;
+  private static readonly V_PAD = 9;
+
+  /**
+   * Compute a fit scale numerically against the first page.
+   * Avoids `currentScaleValue` presets entirely — see open() for why.
+   */
+  private async numericFitScale(mode: "width" | "page"): Promise<number> {
+    if (!this.doc) return 1;
+    try {
+      const page = await this.doc.getPage(1);
+      const vp = page.getViewport({ scale: 1 });
+      const w = (this.container.clientWidth - PdfjsAdapter.H_PAD) / vp.width;
+      const h = (this.container.clientHeight - PdfjsAdapter.V_PAD) / vp.height;
+      const s = mode === "width" ? w : Math.min(w, h);
+      return Math.min(10, Math.max(0.1, s || 1));
+    } catch (e) {
+      this.diagnostics.log("warn", `numericFitScale failed: ${String(e)}`);
+      return 1;
+    }
+  }
+
+  private async applyScale(scale: number): Promise<void> {
+    this.pdfViewer.currentScale = scale;
+    this.onScaleChanged?.();
+  }
+
   setZoom(scale: number): void {
     this.pdfViewer.currentScale = Math.min(10, Math.max(0.1, scale));
+    this.onScaleChanged?.();
   }
 
   zoomBy(factor: number): void {
     this.setZoom(this.pdfViewer.currentScale * factor);
   }
 
-  fitWidth(): void {
-    this.pdfViewer.currentScaleValue = ZoomMode.WIDTH;
+  async fitWidth(): Promise<void> {
+    await this.applyScale(await this.numericFitScale("width"));
   }
 
-  fitPage(): void {
-    this.pdfViewer.currentScaleValue = ZoomMode.FIT;
+  async fitPage(): Promise<void> {
+    await this.applyScale(await this.numericFitScale("page"));
   }
+
+  /** Notified whenever the scale changes so the UI can refresh the label. */
+  onScaleChanged: (() => void) | null = null;
 
   /* ------------------------------------------------------------------ Save */
 

@@ -1,0 +1,18 @@
+[console.debug] [vite] connecting...
+[console.debug] [vite] connected.
+[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)
+[console.log] [PaperAI] PDF.js 6.4.299 viewer initialised
+[console.log] [PaperAI] ready — PDF.js 6.4.299, tauri=false
+info: {
+  "paperai": "object",
+  "ready": true,
+  "title": "PaperAI",
+  "bodyLen": 1932,
+  "logs": [
+    {
+      "t": 1792005843999,
+      "level": "success",
+      "msg": "PDF.js 6.4.299 viewer initialised"
+    }
+  ]
+}

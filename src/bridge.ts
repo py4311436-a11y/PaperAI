@@ -133,8 +133,13 @@ export async function pickSaveTarget(defaultName: string): Promise<string | null
   return p ?? null;
 }
 
-/** Subscribe to files forwarded by a second instance. */
+/**
+ * Subscribe to files forwarded by a second instance.
+ * Outside Tauri (browser regression runs) this is a no-op — `listen()` would
+ * throw because `__TAURI_INTERNALS__.transformCallback` does not exist.
+ */
 export function onOpenFiles(cb: (paths: string[]) => void): Promise<() => void> {
+  if (!isTauri) return Promise.resolve(() => undefined);
   return listen<string[]>(OPEN_FILES_EVENT, (e) => cb(e.payload ?? []));
 }
 

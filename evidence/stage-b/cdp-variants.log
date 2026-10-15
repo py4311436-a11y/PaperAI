@@ -1,0 +1,7 @@
+attached: http://tauri.localhost/ session: D1CD037E401513BE0FBCF2877D543387
+  expression+returnByValue => 2
+  +awaitPromise:false      => 2
+  +awaitPromise:true       => 2
+  app probe                => "object"
+  app ready                => true
+  ready with await         => true

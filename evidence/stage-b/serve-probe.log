@@ -1,0 +1,9 @@
+t+0.0s serving D:\AIreader\PaperAI-PoC\dist at http://127.0.0.1:8099/
+t+0.6s target: http://127.0.0.1:8099/
+t+21.4s href = "http://127.0.0.1:8099/"
+t+21.4s paperai = "undefined"
+t+21.4s ready = false
+t+21.4s isTauri = undefined
+t+21.4s pdfjs = undefined
+t+21.4s title = "PaperAI"
+t+21.4s logs = ""

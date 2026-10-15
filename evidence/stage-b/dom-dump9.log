@@ -1,0 +1,68 @@
+  rAF ticks in 2s: 5 | screencast frames so far: 1
+--- opening pdf ---
+  [resp] 200 http://ipc.localhost/open_pdf
+  [resp] 200 http://ipc.localhost/open_pdf
+  [resp] 200 http://ipc.localhost/read_pdf_file
+  [resp] 200 http://ipc.localhost/read_pdf_file
+  [console.error] scrollPageIntoView: "1" is not a valid pageNumber parameter.
+  [console.log] [PaperAI] AnnotationEditorUIManager acquired
+  [resp] 200 data:image/gif;base64,R0lGODlhGAAYAPQAAP///wAAAM7Ozvr6+uDg4LCwsOjo6I6OjsjIyJycnNjY2KioqMDAwPLy8nZ2doaGhri4uGhoaAAAAAAAAAAAAAAAAAAA
+{
+  "numPages": 23,
+  "viewport": {
+    "innerW": 1280,
+    "innerH": 700,
+    "dpr": 1.5
+  },
+  "sizes": {
+    "container": {
+      "w": 1280,
+      "h": 634
+    },
+    "viewer": {
+      "w": 1265,
+      "h": 24127
+    },
+    "firstPage": {
+      "w": 792,
+      "h": 1056
+    }
+  },
+  "scale": 1,
+  "counts": {
+    "#viewer": 1,
+    "#viewer > *": 23,
+    ".page": 23,
+    ".pdfViewer": 1,
+    ".textLayer": 2,
+    ".textLayer span": 273,
+    "canvas": 3
+  },
+  "viewerClasses": "pdfViewer",
+  "viewerParentClasses": "",
+  "firstPageTag": "DIV.page",
+  "firstPageChildren": [
+    "DIV.canvasWrapper",
+    "DIV.textLayer selectionRendering",
+    "DIV.annotationLayer",
+    "DIV.annotationEditorLayer disabled nonEditing"
+  ],
+  "sampleSpanText": "IEEE TRANSACTIONS ON POWER ELECTRONICS, ",
+  "pageInlineStyle": "width: round(down, var(--total-scale-factor) * 594px, var(--scale-round-x)); height: round(down, var(--total-scale-factor) * 792px, var(--scale-round-y)); --scale-round-x: 2px; --scale-round-y: 2px;",
+  "pageComputed": {
+    "width": "792px",
+    "height": "1056px",
+    "display": "block",
+    "position": "relative"
+  },
+  "containerClient": {
+    "w": 1265,
+    "h": 634
+  },
+  "pageData": {
+    "pageNumber": "1",
+    "l10nId": "pdfjs-page-landmark",
+    "l10nArgs": "{\"page\":1}",
+    "loaded": "true"
+  }
+}

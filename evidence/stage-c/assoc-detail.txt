@@ -1,0 +1,21 @@
+﻿--- HKLM\SOFTWARE\Classes\Applications\PaperAI.exe ---
+False
+--- HKCU .pdf OpenWithProgids values ---
+KWPS.PDF.9, workbuddyai.pdf
+--- HKCU .pdf OpenWithList ---
+
+--- any key named PaperAI under HKCU/HKLM Classes ---
+--- OpenWithProgids full ---
+
+
+KWPS.PDF.9      : 
+workbuddyai.pdf : 
+PSPath          : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\SOFTWARE\Classes\.pdf\OpenWithProgids
+PSParentPath    : Microsoft.PowerShell.Core\Registry::HKEY_CURRENT_USER\SOFTWARE\Classes\.pdf
+PSChildName     : OpenWithProgids
+PSDrive         : HKCU
+PSProvider      : Microsoft.PowerShell.Core\Registry
+
+
+
+

@@ -3,4 +3,10 @@ dist/
 target/
 *.local
 .DS_Store
-evidence/**/*.png
+public/cmaps/
+public/standard_fonts/
+evidence/stage-d/edge-profile/
+evidence/stage-d/edge-gdi-profile/
+evidence/stage-d/edge-serve-profile/
+evidence/stage-b/edge-ctrl-profile/
+evidence/stage-b/edge-profile/

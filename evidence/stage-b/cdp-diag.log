@@ -1,0 +1,4 @@
+browser: ws://127.0.0.1:9361/devtools/browser/4d8cb479-bbea-4ffc-82fd-bec18e36ca76
+app url: http://tauri.localhost/
+targets: browser: , page:http://tauri.localhost/
+FAILED: Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.

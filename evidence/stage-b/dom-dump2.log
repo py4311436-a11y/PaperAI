@@ -1,0 +1,33 @@
+  [resp] 200 http://tauri.localhost/assets/pdf_viewer-DQGPLRY2.js
+  [console.log] [PaperAI] PDF.js 6.4.299 viewer initialised
+  [resp] 200 http://ipc.localhost/take_pending_files
+  [resp] 200 http://ipc.localhost/take_pending_files
+  [console.log] [PaperAI] ready — PDF.js 6.4.299, tauri=true
+--- opening pdf ---
+  [resp] 200 http://ipc.localhost/open_pdf
+  [resp] 200 http://ipc.localhost/open_pdf
+  [resp] 200 http://ipc.localhost/read_pdf_file
+  [resp] 200 http://ipc.localhost/read_pdf_file
+  [console.log] [PaperAI] AnnotationEditorUIManager acquired
+  [console.log] [PaperAI] Tool -> select (mode=0)
+  [console.log] [PaperAI] Opened "PDF-A-single.pdf" — 23 page(s)
+  [resp] 200 http://tauri.localhost/assets/window-I_aD2fsK.js
+  [resp] 200 http://ipc.localhost/plugin%3Awindow%7Cset_title
+  [resp] 200 http://ipc.localhost/plugin%3Awindow%7Cset_title
+{
+  "numPages": 23,
+  "counts": {
+    "#viewer": 1,
+    "#viewer > *": 23,
+    ".page": 23,
+    ".pdfViewer": 0,
+    ".textLayer": 0,
+    ".textLayer span": 0,
+    "canvas": 0
+  },
+  "viewerClasses": "",
+  "viewerParentClasses": "",
+  "firstPageTag": "DIV.page",
+  "firstPageChildren": [],
+  "sampleSpanText": null
+}

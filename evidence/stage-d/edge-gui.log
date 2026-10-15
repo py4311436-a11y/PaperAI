@@ -1,0 +1,12 @@
+[PASS    ] D1.0  带批注的测试 PDF 存在
+            D:\AIreader\PaperAI-PoC\output\annotated-desktop.pdf -> D:\AIreader\PaperAI-PoC\evidence\stage-d\annotated-EDGE-GUI.pdf
+[PASS    ] D1.1  以 GUI 方式启动 Edge 打开 PDF
+            pid=13412, D:\AIreader\PaperAI-PoC\evidence\stage-d\annotated-EDGE-GUI.pdf
+[PASS    ] D1.2  连接到 Edge PDF 阅读器窗口
+            file:///D:/AIreader/PaperAI-PoC/evidence/stage-d/annotated-EDGE-GUI.pdf
+[PASS    ] D1.3  截图捕获（Edge 内置 PDF 阅读器）
+            D:\AIreader\PaperAI-PoC\evidence\stage-d\edge-annotated.png (6116 bytes)
+[PASS    ] D1.4  记录所用阅读器与文件
+            url=file:///D:/AIreader/PaperAI-PoC/evidence/stage-d/annotated-EDGE-GUI.pdf title=
+
+MANUAL STEP REQUIRED: open D:\AIreader\PaperAI-PoC\evidence\stage-d\edge-annotated.png and confirm the highlight and ink strokes are visible.
