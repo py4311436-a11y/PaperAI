@@ -2,6 +2,9 @@ node_modules/
 dist/
 dist-test/
 target/
+# Shipped installers. Deliberately OUTSIDE dist/: tauri.conf.json embeds all of
+# dist/ into the binary, so an installer kept there gets nested into the next one.
+release/
 *.local
 .DS_Store
 public/cmaps/
@@ -13,5 +16,3 @@ evidence/stage-d/edge-pw-profile/
 evidence/stage-d/edge-gdi2-profile/
 evidence/stage-b/edge-ctrl-profile/
 evidence/stage-b/edge-profile/
-.installer-stash/
-.installer-stash/

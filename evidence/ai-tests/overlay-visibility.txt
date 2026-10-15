@@ -1,0 +1,21 @@
+# overlay visibility (real Chromium, computed style)
+stylesheet: dist\assets\index-DSATTBxi.css (216312 bytes)
+browser   : C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
+
+PASS  live/ai-settings  hidden=true 时必须 display:none  [display=none]
+PASS  live/ai-settings  hidden=false 时必须恢复可见（修复不能把它永久隐藏）  [display=flex]
+PASS  live/ai-settings  再次隐藏必须生效（可反复切换）  [display=none]
+PASS  live/ai-panel  hidden=true 时必须 display:none  [display=none]
+PASS  live/ai-panel  hidden=false 时必须恢复可见（修复不能把它永久隐藏）  [display=flex]
+PASS  live/ai-panel  再次隐藏必须生效（可反复切换）  [display=none]
+PASS  live/selection-bar  hidden=true 时必须 display:none  [display=none]
+PASS  live/selection-bar  hidden=false 时必须恢复可见（修复不能把它永久隐藏）  [display=flex]
+PASS  live/selection-bar  再次隐藏必须生效（可反复切换）  [display=none]
+PASS  latent/recovery-modal  hidden=true 时必须 display:none  [display=none]
+PASS  latent/recovery-modal  hidden=false 时必须恢复可见（修复不能把它永久隐藏）  [display=flex]
+PASS  latent/recovery-modal  再次隐藏必须生效（可反复切换）  [display=none]
+PASS  control/ai-stop  hidden=true 时必须 display:none  [display=none]
+PASS  control/ai-stop  hidden=false 时必须恢复可见（修复不能把它永久隐藏）  [display=block]
+PASS  control/ai-stop  再次隐藏必须生效（可反复切换）  [display=none]
+
+15/15 PASS

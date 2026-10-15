@@ -11,9 +11,19 @@
  * The flag is consumed by `src/main.ts` as a *statically known* constant, so
  * Rollup can tree-shake the whole test-bridge block out of a release bundle.
  * `scripts/verify-release-bundle.mjs` asserts that it really is gone.
+ *
+ * ---------------------------------------------------------------------------
+ * `dist/` IS NOT A DELIVERY FOLDER.
+ *
+ * `tauri.conf.json` sets `frontendDist: "../dist"`, so EVERYTHING in `dist/` is
+ * embedded into the binary and therefore into the setup.exe. Storing the shipped
+ * installer in `dist/installer/` once produced a build where 0.3.1 shipped with
+ * 0.2.0 and 0.3.0 nested inside it — 22.25 MiB instead of 5.5 MiB, and growing
+ * with every release. Setup files now live in `release/`, and the guard below
+ * fails the build if anything unexpected appears in `dist/`.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
@@ -24,6 +34,15 @@ if (arg !== "--release" && arg !== "--automation") {
   process.exit(2);
 }
 const automation = arg === "--automation";
+
+/**
+ * The only entries `dist/` may contain after a build.
+ *
+ * `assets/` and `index.html` come from Vite; `cmaps/` and `standard_fonts/`
+ * are vendored PDF.js assets copied out of `public/`. Anything else means
+ * someone put a non-frontend file where the bundler will pick it up.
+ */
+const ALLOWED_DIST_ENTRIES = new Set(["assets", "index.html", "cmaps", "standard_fonts"]);
 
 // 1. PDF.js assets must be in place before Vite copies them.
 const sync = spawnSync(process.execPath, [path.join(ROOT, "scripts", "sync-pdfjs-assets.mjs")], {
@@ -43,27 +62,7 @@ if (tsc.status !== 0) {
   process.exit(tsc.status ?? 1);
 }
 
-// 3. Bundle with the flag pinned.
-//
-// Vite empties `outDir` by default, and the installer lives in `dist/installer`
-// — so a plain rebuild silently DELETED the shipped setup.exe. That happened
-// once during this round and the artefact had to be recovered from the Cargo
-// target directory. Preserve it explicitly rather than relying on the operator
-// to remember.
-const installerDir = path.join(ROOT, "dist", "installer");
-// NOTE: the stash must live OUTSIDE dist/. Vite's emptyOutDir removes the whole
-// directory tree, so a stash inside it is deleted along with the installer —
-// which is exactly the bug this code exists to prevent.
-const stash = path.join(ROOT, ".installer-stash");
-let preserved = [];
-if (existsSync(installerDir)) {
-  mkdirSync(stash, { recursive: true });
-  for (const f of readdirSync(installerDir)) {
-    renameSync(path.join(installerDir, f), path.join(stash, f));
-    preserved.push(f);
-  }
-}
-
+// 3. Bundle with the flag pinned. Vite empties outDir itself.
 const vite = path.join(ROOT, "node_modules", "vite", "bin", "vite.js");
 const r = spawnSync(process.execPath, [vite, "build"], {
   cwd: ROOT,
@@ -73,16 +72,24 @@ const r = spawnSync(process.execPath, [vite, "build"], {
     VITE_PAPERAI_AUTOMATION: automation ? "1" : "0",
   },
 });
-
-if (preserved.length) {
-  mkdirSync(installerDir, { recursive: true });
-  for (const f of preserved) {
-    renameSync(path.join(stash, f), path.join(installerDir, f));
-  }
-  rmdirSync(stash, { recursive: true, force: true });
-  console.log(`preserved ${preserved.length} installer(s) in dist/installer/`);
-}
-
 if (r.status !== 0) process.exit(r.status ?? 1);
+
+// 4. Guard: nothing but frontend assets may sit in dist/.
+const dist = path.join(ROOT, "dist");
+const strays = existsSync(dist)
+  ? readdirSync(dist).filter((e) => !ALLOWED_DIST_ENTRIES.has(e))
+  : [];
+if (strays.length) {
+  console.error(
+    `\nREFUSING TO CONTINUE: dist/ contains entries that are not frontend assets:\n` +
+      strays.map((s) => `  dist/${s}`).join("\n") +
+      `\n\n` +
+      `tauri.conf.json sets frontendDist to "../dist", so anything here is embedded\n` +
+      `into the setup.exe. Move it to release/ (see scripts/collect-release.mjs), or\n` +
+      `add it to ALLOWED_DIST_ENTRIES in this file if it genuinely belongs in the\n` +
+      `bundle.`
+  );
+  process.exit(1);
+}
 
 console.log(`\nbuilt flavour: ${automation ? "automation (test bridge PRESENT)" : "release (test bridge ABSENT)"}`);

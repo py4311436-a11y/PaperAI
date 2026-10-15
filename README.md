@@ -6,7 +6,7 @@ Built with **Tauri 2 + PDF.js 6.4.299**. Real PDF annotations (highlight, ink)
 are written back into the file; select a passage and ask an AI to explain or
 translate it, with the answer streamed into a side panel.
 
-> Status: **0.3.0**. See `reports/PHASE3_FINAL_VALIDATION.md` for what is proven
+> Status: **0.3.1**. See `reports/PHASE3_FINAL_VALIDATION.md` for what is proven
 > and what is not — in particular, the AI loop has not yet been exercised by a
 > human on a real desktop, and no live provider has been contacted.
 > Earlier documents (`FINAL_TECHNICAL_VALIDATION.md`, `TEST_RESULTS.md`) are kept
@@ -25,8 +25,8 @@ translate it, with the answer streamed into a side panel.
 
 ```powershell
 # 1. run the installer
-.\dist\installer\PaperAI_0.3.0_x64-setup.exe
-# silently:  Start-Process .\dist\installer\PaperAI_0.3.0_x64-setup.exe -ArgumentList /S -Wait
+.\release\PaperAI_0.3.1_x64-setup.exe
+# silently:  Start-Process .\release\PaperAI_0.3.1_x64-setup.exe -ArgumentList /S -Wait
 
 # 2. nothing else needed — the installer registers PaperAI as a .pdf
 #    "Open with" candidate, and the uninstaller removes it again.
@@ -136,8 +136,8 @@ node scripts/run-ai-rust-tests.mjs      # provider vs a real local Mock SSE serv
 node scripts/run-ai-unit-tests.mjs      # context, state machine, markdown safety
 
 # Windows: install / CLI / single instance / uninstall / file association
-node tests/windows-integration.mjs --installer dist/installer/PaperAI_0.3.0_x64-setup.exe
-node tests/windows-upgrade.mjs          # 0.2.0 -> 0.3.0
+node tests/windows-integration.mjs --installer release/PaperAI_0.3.1_x64-setup.exe
+node tests/windows-upgrade.mjs          # 0.2.0 -> 0.3.0 -> 0.3.1
 
 # Need a real GUI session (blocked by K-13 on machines without CDP)
 node tests/desktop-verify.mjs --exe "<…\PaperAI.exe>"
@@ -188,5 +188,15 @@ test-fixtures/       writable COPIES used by destructive tests (MANIFEST.json)
 scripts/             env inventory, fixtures, icons, build flavours, runners
 reports/             stage reports, security/privacy notes, final validation
 evidence/            raw logs, request logs and screenshots per stage
-dist/installer/      the generated NSIS setup.exe
+release/            the shipped NSIS setup.exe (NOT dist/ — see below)
 ```
+
+**`dist/` is not a delivery folder.** `tauri.conf.json` sets `frontendDist` to
+`../dist`, so every file in there is embedded into the binary and into the
+setup.exe. Keeping an installer in `dist/installer/` once produced a 0.3.1 build
+that contained the 0.2.0 and 0.3.0 installers inside it (22.25 MiB instead of
+5.46 MiB, and growing each release). `scripts/build.mjs` now fails the build if
+anything other than frontend assets shows up in `dist/` — the mistakes here were
+all silent, so the guard matters more than the fix. Use `npm run size:report` to
+see the breakdown and `npm run release:collect` to copy a built setup into
+`release/`.

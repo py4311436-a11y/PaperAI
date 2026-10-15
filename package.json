@@ -1,7 +1,7 @@
 {
   "name": "paperai-poc",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "PaperAI — Read · Annotate · Ask. Windows desktop PDF reader (Tauri 2 + PDF.js)",
   "scripts": {
@@ -19,7 +19,11 @@
     "test:ai-unit": "node scripts/run-ai-unit-tests.mjs",
     "test:ai-rust": "node scripts/run-ai-rust-tests.mjs",
     "test:ai": "npm run test:ai-unit && npm run test:ai-rust",
-    "verify:bundle": "node scripts/verify-release-bundle.mjs"
+    "verify:bundle": "node scripts/verify-release-bundle.mjs",
+    "test:ui-overlay": "node tests/overlay-visibility.mjs",
+    "test:all": "npm run test:ai && npm run test:ui-overlay",
+    "release:collect": "node scripts/collect-release.mjs",
+    "size:report": "node scripts/size-report.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3",

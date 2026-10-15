@@ -40,16 +40,28 @@ export class ProviderSettings {
     this.overlay.addEventListener("click", (e) => {
       if (e.target === this.overlay) this.hide();
     });
+    // Escape closes. Registered on the document rather than the overlay so it
+    // works no matter which control inside the card has focus.
+    this.onKeydown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !this.overlay.hidden) {
+        e.stopPropagation();
+        this.hide();
+      }
+    };
   }
+
+  private onKeydown: (e: KeyboardEvent) => void;
 
   async open(): Promise<void> {
     document.body.appendChild(this.overlay);
     this.overlay.hidden = false;
+    document.addEventListener("keydown", this.onKeydown);
     await this.reload();
   }
 
   hide(): void {
     this.overlay.hidden = true;
+    document.removeEventListener("keydown", this.onKeydown);
     // Never leave a key sitting in the DOM.
     this.editing = null;
   }

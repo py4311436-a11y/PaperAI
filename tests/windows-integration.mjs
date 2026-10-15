@@ -43,6 +43,45 @@ function ps(script) {
   return { ok: r.status === 0, out: (r.stdout || "").trim(), err: (r.stderr || "").trim(), status: r.status };
 }
 
+/**
+ * Where did the installer actually put the app?
+ *
+ * Do NOT assume `%LOCALAPPDATA%\PaperAI`. NSIS remembers the directory chosen
+ * the first time and reuses it silently on every later run, so a machine where
+ * someone picked `D:\Program Files\PaperAI` (or where a different Tauri version
+ * used `%LOCALAPPDATA%\Programs`) keeps installing there. Hardcoding the path
+ * made C1.3 fail on a perfectly good install — the app was at D:\ and the test
+ * was looking in C:\.
+ *
+ * The uninstall registry entry is the authoritative answer; the old locations
+ * are only a fallback for a fresh machine.
+ */
+function resolveInstallDir() {
+  return ps(
+    `$dir = $null; ` +
+      `$u = Get-ChildItem 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' -ErrorAction SilentlyContinue | ` +
+      `  Get-ItemProperty | Where-Object { $_.DisplayName -like '*PaperAI*' } | Select-Object -First 1; ` +
+      `if ($u -and $u.InstallLocation) { $dir = $u.InstallLocation.Trim('"') }; ` +
+      `if (-not $dir -or -not (Test-Path (Join-Path $dir 'PaperAI.exe'))) { ` +
+      `  $dir = $null; ` +
+      `  foreach ($c in @("$env:LOCALAPPDATA\\Programs\\PaperAI", "$env:LOCALAPPDATA\\PaperAI")) { ` +
+      `    if (Test-Path (Join-Path $c 'PaperAI.exe')) { $dir = $c; break } } }; ` +
+      `if ($dir) { $dir } else { '' }`
+  ).out;
+}
+
+/** ProductVersion of the installed PaperAI.exe, or "" if absent. */
+function installedVersion(dir) {
+  if (!dir) return "";
+  return ps(
+    `$e = Join-Path ${JSON.stringify(dir)} 'PaperAI.exe'; ` +
+      `if (Test-Path $e) { (Get-Item $e).VersionInfo.ProductVersion } else { '' }`
+  ).out;
+}
+
+/** PaperAI_x.y.z_x64-setup.exe -> "x.y.z" */
+const EXPECTED_VERSION = INSTALLER ? /PaperAI_(\d+\.\d+\.\d+)_/.exec(path.basename(INSTALLER))?.[1] ?? null : null;
+
 function sha256(file) {
   return new Promise((resolve, reject) => {
     const h = createHash("sha256");
@@ -105,9 +144,12 @@ async function main() {
   // existing install takes NSIS's update path, which does not re-run the
   // install section and therefore does not re-register the file association —
   // that made C2.1 look flaky. A clean install is what we want to verify.
+  const priorDir = resolveInstallDir();
   const preUninstall = ps(
-    `$u = Join-Path $env:LOCALAPPDATA 'PaperAI\\uninstall.exe'; ` +
-    `if (Test-Path $u) { $p = Start-Process $u -ArgumentList '/S' -Wait -PassThru; 'uninstalled rc=' + $p.ExitCode } else { 'nothing installed' }`
+    priorDir
+      ? `$u = Join-Path ${JSON.stringify(priorDir)} 'uninstall.exe'; ` +
+        `if (Test-Path $u) { $p = Start-Process $u -ArgumentList '/S' -Wait -PassThru; 'uninstalled rc=' + $p.ExitCode } else { 'no uninstaller at ${priorDir.replace(/\\/g, "\\\\")}' }`
+      : `'nothing installed'`
   ).out;
 
   const beforeProgId = ps(`(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\UserChoice' -ErrorAction SilentlyContinue).ProgId`).out;
@@ -116,26 +158,22 @@ async function main() {
   await sleep(4000);
   record("C1.1", "静默安装执行", inst.status === 0 ? "PASS" : "FAIL", `退出码=${inst.status}`);
 
-  const where = ps(
-    `$p = @(); ` +
-      `$p += (Get-ChildItem "$env:LOCALAPPDATA\\Programs\\PaperAI" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }); ` +
-      `$p += (Get-ChildItem "$env:LOCALAPPDATA\\PaperAI" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }); ` +
-      `$p -join ' | '`
-  );
-  record("C1.2", "安装目录已生成", where.out ? "PASS" : "FAIL", where.out || "(未找到)");
+  const installDir = resolveInstallDir();
+  record("C1.2", "安装目录已生成", installDir ? "PASS" : "FAIL", installDir || "(未找到)");
 
-  const exe = ps(
-    `$c = @(); ` +
-      `$c += (Get-ChildItem "$env:LOCALAPPDATA\\Programs\\PaperAI\\*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'PaperAI.exe' } | ForEach-Object { $_.FullName }); ` +
-      `$c += (Get-ChildItem "$env:LOCALAPPDATA\\PaperAI\\*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'PaperAI.exe' } | ForEach-Object { $_.FullName }); ` +
-      `$c -join ' | '`
-  ).out;
+  const exe = installDir ? path.join(installDir, "PaperAI.exe") : "";
   if (!exe) {
-    record("C1.3", "主程序 PaperAI.exe", "FAIL", `未找到；已安装内容=${where.out || "(none)"}`);
+    record("C1.3", "主程序 PaperAI.exe", "FAIL", "未找到安装目录（注册表中无 InstallLocation）");
     writeReport();
     process.exit(1);
   }
-  record("C1.3", "主程序 PaperAI.exe", "PASS", exe);
+  const exeVersion = installedVersion(installDir);
+  record(
+    "C1.3",
+    "主程序存在且版本与安装包一致",
+    exeVersion === EXPECTED_VERSION ? "PASS" : "FAIL",
+    `${exe}  ProductVersion=${exeVersion || "(缺失)"}  期望=${EXPECTED_VERSION ?? "(未知，安装包名不含版本)"}`
+  );
 
   const startMenu = ps(
     `Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs" -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*PaperAI*' } | ForEach-Object { $_.FullName }`
@@ -247,8 +285,8 @@ async function main() {
     record("C5.1", "卸载程序执行", uRun.status === 0 ? "PASS" : "PARTIAL", `退出码=${uRun.status} 命令=${target}`);
 
     const gone = ps(
-      `$c = @(Get-ChildItem "$env:LOCALAPPDATA\\Programs\\PaperAI\\PaperAI.exe","$env:LOCALAPPDATA\\PaperAI\\PaperAI.exe" -ErrorAction SilentlyContinue); ` +
-      `if ($c.Count -gt 0) { "True" } else { "False" }`
+      `$e = Join-Path ${JSON.stringify(installDir)} 'PaperAI.exe'; ` +
+        `if (Test-Path $e) { "True" } else { "False" }`
     ).out;
     const regGone = ps(
       `Get-ChildItem 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' -ErrorAction SilentlyContinue | Get-ItemProperty | Where-Object { $_.DisplayName -like '*PaperAI*' } | Measure-Object | ForEach-Object { $_.Count }`

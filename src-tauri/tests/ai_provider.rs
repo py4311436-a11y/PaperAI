@@ -64,9 +64,26 @@ fn scenario() -> String {
     std::env::var("PAPERAI_MOCK_SCENARIO").unwrap_or_default()
 }
 
-/// Reset the stored key so each test starts from a known state.
-fn with_key() {
+/// Deletes the test credential when it goes out of scope.
+///
+/// This suite writes into the REAL Windows Credential Manager, so leaving the
+/// entry behind would put a junk item in the user's credential store — and one
+/// was indeed found there (`PaperAI/AIProvider/rust-test-profile`) after an
+/// earlier run. `Drop` covers the normal return and the unwinding-from-panic
+/// case both, which a trailing statement would not.
+struct KeyGuard;
+
+impl Drop for KeyGuard {
+    fn drop(&mut self) {
+        let _ = secrets::delete_secret(PROFILE);
+    }
+}
+
+/// Reset the stored key so each test starts from a known state, and arrange for
+/// it to be removed again. Bind the result: `let _key = with_key();`.
+fn with_key() -> KeyGuard {
     secrets::write_secret(PROFILE, "sk-mock-0123456789").expect("store mock key");
+    KeyGuard
 }
 
 fn call(messages: Vec<(&str, &str)>) -> ChatCall {
@@ -118,7 +135,7 @@ macro_rules! need_mock {
 #[test]
 fn happy_path_streams_and_completes() {
     need_mock!("happy");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "解释这段话")]));
 
     assert!(matches!(c.events().first(), Some(AiStreamEvent::Started)));
@@ -146,7 +163,7 @@ fn happy_path_streams_and_completes() {
 #[test]
 fn batched_events_in_one_packet() {
     need_mock!("batched");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     assert_eq!(c.text(), "AB");
     assert!(matches!(c.terminal(), Some(AiStreamEvent::Completed { .. })));
@@ -155,7 +172,7 @@ fn batched_events_in_one_packet() {
 #[test]
 fn utf8_split_across_chunks_is_not_corrupted() {
     need_mock!("splitUtf8");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     assert_eq!(c.text(), "中文流式测试", "multi-byte chars must survive chunk boundaries");
 }
@@ -163,7 +180,7 @@ fn utf8_split_across_chunks_is_not_corrupted() {
 #[test]
 fn crlf_and_comment_lines() {
     need_mock!("crlfAndComments");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     assert_eq!(c.text(), "crlf");
     assert!(matches!(c.terminal(), Some(AiStreamEvent::Completed { .. })));
@@ -172,7 +189,7 @@ fn crlf_and_comment_lines() {
 #[test]
 fn empty_choices_and_usage_only_tail_do_not_error() {
     need_mock!("emptyThenUsage");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     assert_eq!(c.text(), "");
     // No content at all, but the stream was well-formed and terminated.
@@ -182,7 +199,7 @@ fn empty_choices_and_usage_only_tail_do_not_error() {
 #[test]
 fn missing_done_is_a_success_when_content_arrived() {
     need_mock!("noDone");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     assert_eq!(c.text(), "没有DONE的完整回答");
     assert!(matches!(c.terminal(), Some(AiStreamEvent::Completed { .. })));
@@ -191,7 +208,7 @@ fn missing_done_is_a_success_when_content_arrived() {
 #[test]
 fn abrupt_close_without_content_is_an_error_not_a_silent_success() {
     need_mock!("abruptEmpty");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_bad_stream"),
@@ -202,7 +219,7 @@ fn abrupt_close_without_content_is_an_error_not_a_silent_success() {
 #[test]
 fn in_stream_error_object_terminates_with_error() {
     need_mock!("midStreamError");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     assert_eq!(c.text(), "开始");
     match c.terminal() {
@@ -217,7 +234,7 @@ fn in_stream_error_object_terminates_with_error() {
 #[test]
 fn non_sse_200_is_reported_as_bad_stream() {
     need_mock!("notSse");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_bad_stream"),
@@ -228,7 +245,7 @@ fn non_sse_200_is_reported_as_bad_stream() {
 #[test]
 fn http_401_maps_to_unauthorized() {
     need_mock!("unauthorized");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_unauthorized"),
@@ -239,7 +256,7 @@ fn http_401_maps_to_unauthorized() {
 #[test]
 fn http_403_maps_to_unauthorized() {
     need_mock!("forbidden");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_unauthorized"),
@@ -250,7 +267,7 @@ fn http_403_maps_to_unauthorized() {
 #[test]
 fn http_404_maps_to_not_found_with_a_url_hint() {
     need_mock!("modelNotFound");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, safe_message }) => {
@@ -264,7 +281,7 @@ fn http_404_maps_to_not_found_with_a_url_hint() {
 #[test]
 fn http_429_maps_to_rate_limited() {
     need_mock!("rateLimited");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_rate_limited"),
@@ -275,7 +292,7 @@ fn http_429_maps_to_rate_limited() {
 #[test]
 fn http_500_maps_to_provider_error() {
     need_mock!("serverError");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_provider_error"),
@@ -286,7 +303,7 @@ fn http_500_maps_to_provider_error() {
 #[test]
 fn http_400_maps_to_bad_config() {
     need_mock!("badRequest");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => assert_eq!(code, "ai_bad_config"),
@@ -297,7 +314,7 @@ fn http_400_maps_to_bad_config() {
 #[test]
 fn redirect_is_not_followed() {
     need_mock!("redirect");
-    with_key();
+    let _key = with_key();
     let c = run(call(vec![("user", "hi")]));
     match c.terminal() {
         Some(AiStreamEvent::Error { code, .. }) => {
@@ -356,7 +373,7 @@ fn plain_http_to_a_remote_host_is_refused() {
 #[test]
 fn cancel_stops_the_stream_promptly() {
     need_mock!("slow");
-    with_key();
+    let _key = with_key();
     let c = Collector::default();
     let sink = c.sink();
     let provider = Arc::new(OpenAiCompatible::new().unwrap());
@@ -381,7 +398,7 @@ fn cancel_stops_the_stream_promptly() {
 #[test]
 fn context_is_sent_verbatim_and_nothing_else() {
     need_mock!("happy");
-    with_key();
+    let _key = with_key();
     let _ = run(call(vec![
         ("system", "你是学术文献阅读助手"),
         ("user", "解释：<document_context>测试片段</document_context>"),

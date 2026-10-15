@@ -22,6 +22,23 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must beat any author `display:` rule.
+ *
+ * The UA stylesheet's `[hidden] { display: none }` lives in the USER-AGENT
+ * origin, so EVERY author declaration wins against it regardless of
+ * specificity — `#ai-settings { display: flex }` therefore kept a "hidden"
+ * dialog on screen. This bit us on four overlays at once (#ai-settings,
+ * #ai-panel, #recovery-modal, #selection-bar): every one of them toggles
+ * visibility by setting `element.hidden` while the stylesheet sets a flex
+ * display, so none of them actually disappeared.
+ *
+ * `!important` is the point of this rule, not an accident: it has to outrank
+ * id selectors. Keep it, and keep it early.
+ */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;

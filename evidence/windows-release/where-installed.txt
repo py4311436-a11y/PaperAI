@@ -1,0 +1,7 @@
+﻿=== 卸载注册表项 ===
+PaperAI | ver=0.3.1 | loc="D:\Program Files\PaperAI" | uninst="D:\Program Files\PaperAI\uninstall.exe"
+
+=== 磁盘上的 PaperAI.exe ===
+(未找到)
+
+进程数: 0

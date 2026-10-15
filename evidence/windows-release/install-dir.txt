@@ -1,0 +1,8 @@
+﻿存在: True
+  PaperAI.exe   8475136
+  uninstall.exe   88363
+exe ProductVersion: 0.3.1 | FileVersion: 0.3.1
+exe mtime: 10/15/2026 20:54:54
+
+=== NSIS 记住的安装目录 ===
+HKCU:\SOFTWARE\PaperAI

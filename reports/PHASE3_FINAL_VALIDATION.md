@@ -1,4 +1,4 @@
-# PaperAI 0.3.0 — final validation
+# PaperAI 0.3.1 — final validation
 
 Date: 2026-10-15 · Branch `ai-integration` · Version **0.3.0**
 
@@ -29,7 +29,17 @@ manual click-through is in §8.
 | S4 chat panel + safe rendering | **PASS** (logic) / **BLOCKED** (visuals) |
 | S5 K-03 / K-07 / K-13 | **FIXED / MITIGATED / ROOT-CAUSED** |
 | S6 test matrix | 119 assertions green, 4 BLOCKED, 5 PARTIAL |
-| S7 installer + upgrade + uninstall | **PASS** — 17/17 and 11/11 |
+| S7 installer + upgrade + uninstall | **PASS** — 17/17 and 13/13 |
+| **0.3.1 patch** (A-12 + A-13) | **PASS** — 164 assertions green; see §11 |
+
+### 0.3.1 — what the user found, and what it turned up
+
+The user installed 0.3.0 and reported one bug: **the AI settings dialog's 关闭
+button did nothing.** Root cause and fix in §11. Chasing it surfaced two more
+ defects that had shipped — three overlays that could not be hidden at all, and
+ an installer that was nesting every previous installer inside itself. All three
+ are fixed and covered by new automated tests. The user's own configuration and
+ stored key were verified intact, byte for byte, afterwards.
 
 ---
 
@@ -37,12 +47,13 @@ manual click-through is in §8.
 
 | | |
 |---|---|
-| Path | `D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.3.0_x64-setup.exe` |
-| Size | 5,726,436 bytes (5.46 MiB) |
-| SHA-256 | `cfabb1750fa2bcdfa94e26a3d0a9b25a4489545827b51a5cfb0443c04fc98186` |
-| Built | 2026-10-15 20:17 |
+| Path | `D:\AIreader\PaperAI-PoC\release\PaperAI_0.3.1_x64-setup.exe` |
+| Size | 4,988,260 bytes (4.76 MiB) |
+| SHA-256 | `37a3e4636228d164a4d1ebc527eb5a635ce0f0d8c31300afe39cdfed32258509` |
+| Built | 2026-10-15 20:54 |
 | Signature | **unsigned** — Windows will show "unknown publisher". Nothing bypasses SmartScreen. |
-| Installs to | `%LOCALAPPDATA%\PaperAI\` (current user, no elevation) |
+| Installs to | the directory chosen at first install (NSIS remembers it and reuses it). On this machine: `D:\Program Files\PaperAI\`. Current user, no elevation. |
+| Settings live in | `%LOCALAPPDATA%\PaperAI\` — a separate directory from the binary. |
 | Flavour | release — test bridge verified absent |
 
 Previous build kept for the upgrade test:
@@ -267,7 +278,7 @@ node scripts/run-ai-unit-tests.mjs                    # 48
 
 node tests/windows-upgrade.mjs                        # 11
 node tests/windows-integration.mjs \
-     --installer dist/installer/PaperAI_0.3.0_x64-setup.exe   # 17
+     --installer release/PaperAI_0.3.1_x64-setup.exe   # 17
 ```
 
 To try a provider by hand, start the mock and point the app at it:
@@ -301,3 +312,108 @@ Ordered; full list in `KNOWN_ISSUES_AI.md`.
 **Verdict: fit for daily personal use after the §8 pass. Not yet fit for public
 release** — the AI loop has not been exercised by a human, and no real provider
 has been contacted.
+
+---
+
+## 11. The 0.3.1 patch
+
+0.3.0 was installed and used by the user. One bug was reported; investigating it
+found two more shipped defects. All three are fixed here.
+
+### A-12 — the reported bug: 关闭 did nothing
+
+`element.hidden = true` does not hide anything on its own — it relies on the
+user-agent stylesheet's `[hidden] { display: none }`. That rule is in the
+**user-agent origin**, so every author declaration beats it and **specificity is
+never consulted**. The author rule `#ai-settings { display: flex }` therefore
+won. The attribute was set correctly the whole time; the dialog simply stayed on
+screen.
+
+The same held for `#ai-panel` and `#selection-bar`, and all three are created at
+module load with `hidden = true` — so the chat panel's toggle button and the
+selection bar's `hide()` had also been no-ops since launch. Fixed by one rule:
+
+```css
+[hidden] { display: none !important; }
+```
+
+`!important` is load-bearing: it has to outrank ID selectors. Escape now also
+closes the settings dialog; previously there was no keyboard path at all.
+
+**Why the existing 119 assertions missed it:** they test logic, not rendering.
+The DOM was correct and the screen was wrong. This needed a real layout engine.
+
+New test `tests/overlay-visibility.mjs` (`npm run test:ui-overlay`) drives
+**headless Edge over CDP** and asserts `getComputedStyle().display` for every
+overlay in three states (hidden → `none`, shown → visible, hidden again →
+`none`). Run against the **pre-fix** build it fails 4/12 with all four overlays
+stuck at `display: flex`; against the fixed build it passes 15/15. A
+`control/ai-stop` case pins the trigger to "an author `display` rule", since that
+button never had one and always worked.
+
+Note this is the same CDP path that K-13 blocks for the app: CDP works fine for
+an **independent** Edge launched with a fresh `--user-data-dir`. K-13 is specific
+to the WebView2 host, which strips the flag.
+
+### A-13 — the installer contained the previous installers
+
+Found while sanity-checking the new build's size: 22.25 MiB instead of ~5 MiB.
+
+`tauri.conf.json` sets `frontendDist: "../dist"`, so **everything** in `dist/`
+is embedded into the setup.exe. The A-11 fix had moved shipped setup files to
+`dist/installer/` to protect them from `vite build` — straight into the next
+bundler's input. 0.3.1 shipped with 0.2.0 and 0.3.0 nested inside it, and each
+release would have swallowed all the previous ones.
+
+Also found: `vite.config.ts` had `sourcemap: true` unconditionally, so 3.3 MiB
+of `*.map` — and the original TypeScript with it — went into every installer.
+
+| | before | after |
+|---|---|---|
+| `dist/` | 25.97 MiB | 6.14 MiB |
+| installer | 22.25 MiB | **4.76 MiB** |
+
+Deliverables moved to `release/`, outside everything the bundler reads.
+`scripts/build.mjs` now **fails the build** if `dist/` holds anything but
+frontend assets — that guard is the real fix, because all three of these
+mistakes were silent. Verified by planting a stray `public/installer/` and
+confirming the build refuses.
+
+### Test-harness defects, also fixed
+
+Both were capable of damaging the user's machine; neither was a product bug.
+
+* `tests/windows-upgrade.mjs` wrote a credential to
+  `PaperAI/AIProvider/deepseek` — **the user's real key slot** — and never
+  deleted it. One run would have permanently replaced a working API key with a
+  marker string. It now uses its own profile id, cleans up after itself, backs up
+  and restores `ai-profiles.json` via `process.on("exit")`, and reports both.
+* `src-tauri/tests/ai_provider.rs` left `PaperAI/AIProvider/rust-test-profile`
+  behind on every run; a leftover was found in the real credential store. Now
+  removed by a `Drop` guard, which also covers a panicking test.
+* Both test suites assumed the install directory was `%LOCALAPPDATA%\PaperAI`.
+  NSIS remembers the directory chosen at first install, and on this machine that
+  is `D:/Program Files\PaperAI` — so C1.3 and U1.1 read "(none)" from a
+  perfectly good install. Both now resolve it from the uninstall registry entry.
+
+### Verification after the patch
+
+| Suite | Result |
+|---|---|
+| `cargo test --lib` | 43/43 |
+| `cargo test --test save_crash_recovery` | 8/8 |
+| `scripts/run-ai-rust-tests.mjs` (Mock SSE, real socket) | 20/20 |
+| `scripts/run-ai-unit-tests.mjs` | 48/48 |
+| `tests/overlay-visibility.mjs` (headless Chromium) | **15/15** |
+| `tests/windows-integration.mjs` on 0.3.1 | 17/17 |
+| `tests/windows-upgrade.mjs` 0.2.0 → 0.3.1 | **13/13** |
+| `scripts/verify-release-bundle.mjs` | release has no test bridge |
+| **total** | **164 assertions** |
+
+C1.3 is now also a version check: the installed `PaperAI.exe` must report the
+same version as the setup file's name, which would catch an installer that
+deployed a stale binary.
+
+The user's machine was checked independently afterwards: `ai-profiles.json`
+SHA-256 identical before and after, and the only `PaperAI` credential in the
+Windows Credential Manager is the user's own `deepseek` — the test junk is gone.

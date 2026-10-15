@@ -1,6 +1,6 @@
-# AI test matrix — PaperAI 0.3.0
+# AI test matrix — PaperAI 0.3.1
 
-Generated: 2026-10-15 · Branch `ai-integration` · Version `0.3.0`
+Generated: 2026-10-15 · Branch `ai-integration` · Version `0.3.1`
 
 Every status below is the outcome of a run recorded in `evidence/`. Where a
 check could not be run, it says **BLOCKED** and names the blocker — never PASS.
@@ -20,10 +20,14 @@ node scripts/run-ai-rust-tests.mjs            # 20 assertions
 # Frontend logic (context, state machine, markdown safety)
 node scripts/run-ai-unit-tests.mjs            # 48 assertions
 
-# Windows integration (installed app, native window title as the observable)
-node tests/windows-integration.mjs --installer dist/installer/PaperAI_0.3.0_x64-setup.exe
+# Overlay visibility — REAL chromium, getComputedStyle over CDP (A-12)
+# Needs a built stylesheet: run `node scripts/build.mjs --release` first.
+node tests/overlay-visibility.mjs             # 15 assertions
 
-# Upgrade path 0.2.0 -> 0.3.0
+# Windows integration (installed app, native window title as the observable)
+node tests/windows-integration.mjs --installer release/PaperAI_0.3.1_x64-setup.exe
+
+# Upgrade path: oldest -> newest in release/ (currently 0.2.0 -> 0.3.1)
 node tests/windows-upgrade.mjs
 
 # K-03: the release bundle must not contain the test bridge
@@ -31,7 +35,7 @@ node scripts/build.mjs --release && node scripts/verify-release-bundle.mjs dist
 node scripts/build.mjs --automation && node scripts/verify-release-bundle.mjs dist --expect-present
 ```
 
-**Totals: 119 automated assertions green. 4 BLOCKED, 5 PARTIAL.**
+**Totals: 164 automated assertions green. 4 BLOCKED, 4 PARTIAL.**
 
 ---
 
@@ -98,18 +102,19 @@ password field is cleared after save) — GUI-only, see AI-21.
 
 ---
 
-## Phase-2 regression (re-run on 0.3.0, not inherited)
+## Phase-2 regression (re-run on 0.3.1, not inherited)
 
 | Suite | Result | Evidence |
 |---|---|---|
 | `cargo test --lib` | **43/43 PASS** | 2026-10-15, includes all 32 carried-over AI/stream tests |
-| `tests/windows-integration.mjs` (install / CLI / single instance / uninstall / association) | **17/17 PASS** | `evidence/windows-release/stage-c-0.3.0.log` |
-| `tests/windows-upgrade.mjs` (0.2.0 → 0.3.0) | **11/11 PASS** | `evidence/windows-release/upgrade-RESULTS.md` |
+| `tests/windows-integration.mjs` (install / CLI / single instance / uninstall / association) | **17/17 PASS** | `evidence/windows-release/stage-c-0.3.1.log` |
+| `tests/windows-upgrade.mjs` (0.2.0 → 0.3.1) | **13/13 PASS** | `evidence/windows-release/upgrade-run-0.3.1.log` |
+| `tests/overlay-visibility.mjs` (headless Edge + CDP, computed style) | **15/15 PASS** | `evidence/ai-tests/overlay-visibility.txt` |
 | `tests/save-safety.mjs` (12 cases) | **BLOCKED** | Needs the automation build + CDP; K-13. The Rust-level equivalents all pass in `cargo test --test save_crash_recovery` (8/8) |
 | `tests/desktop-verify.mjs` (19 cases) | **BLOCKED** | Same |
 | `tests/readback-annotations.mjs` | **PASS** | Pure Node, no browser |
 
-> The Phase-2 numbers (19/19, 12/12) are **not** reused as evidence for 0.3.0.
+> The Phase-2 numbers (19/19, 12/12) are **not** reused as evidence for 0.3.1.
 > The two suites that need CDP are re-run only in the automation build, and that
 > is currently blocked by K-13 — recorded as BLOCKED, not as PASS.
 

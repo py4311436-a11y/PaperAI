@@ -14,6 +14,11 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
-    sourcemap: true,
+    // Source maps only for automation builds. A release map would (a) add
+    // ~3.3 MiB to dist/, which tauri then embeds into the setup.exe, and
+    // (b) publish the original TypeScript inside a distributed installer.
+    // Automation builds are never shipped, so keeping maps there is useful
+    // when a test fails and you need a real stack trace.
+    sourcemap: process.env.VITE_PAPERAI_AUTOMATION === "1",
   },
 });
