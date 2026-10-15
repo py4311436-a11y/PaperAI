@@ -547,3 +547,42 @@
   background: #eaf1fb;
   border-color: #7ea6d8;
 }
+
+/* ------------------------------------------------ provider presets + model -- */
+
+.ais-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ais-preset {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid #ccd0d6;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.ais-preset:hover {
+  background: #eef3fa;
+  border-color: #7ea6d8;
+}
+
+.ais-modelrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ais-modelrow input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ais-modelrow .ais-link {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

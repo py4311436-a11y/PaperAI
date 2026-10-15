@@ -1,4 +1,4 @@
-# PaperAI 0.3.1 — final validation
+# PaperAI 0.4.0 — final validation
 
 Date: 2026-10-15 · Branch `ai-integration` · Version **0.3.0**
 
@@ -47,10 +47,10 @@ button did nothing.** Root cause and fix in §11. Chasing it surfaced two more
 
 | | |
 |---|---|
-| Path | `D:\AIreader\PaperAI-PoC\release\PaperAI_0.3.1_x64-setup.exe` |
-| Size | 4,988,260 bytes (4.76 MiB) |
-| SHA-256 | `37a3e4636228d164a4d1ebc527eb5a635ce0f0d8c31300afe39cdfed32258509` |
-| Built | 2026-10-15 20:54 |
+| Path | `D:\AIreader\PaperAI-PoC\release\PaperAI_0.4.0_x64-setup.exe` |
+| Size | 5,000,040 bytes (4.77 MiB) |
+| SHA-256 | `b4cbd6a4004eb1c9649813d2408f752bc5750a4bf6bf02dbf6af95cef7cfab0c` |
+| Built | 2026-10-15 22:33 |
 | Signature | **unsigned** — Windows will show "unknown publisher". Nothing bypasses SmartScreen. |
 | Installs to | the directory chosen at first install (NSIS remembers it and reuses it). On this machine: `D:\Program Files\PaperAI\`. Current user, no elevation. |
 | Settings live in | `%LOCALAPPDATA%\PaperAI\` — a separate directory from the binary. |
@@ -278,7 +278,7 @@ node scripts/run-ai-unit-tests.mjs                    # 48
 
 node tests/windows-upgrade.mjs                        # 11
 node tests/windows-integration.mjs \
-     --installer release/PaperAI_0.3.1_x64-setup.exe   # 17
+     --installer release/PaperAI_0.4.0_x64-setup.exe   # 17
 ```
 
 To try a provider by hand, start the mock and point the app at it:
@@ -417,3 +417,138 @@ deployed a stale binary.
 The user's machine was checked independently afterwards: `ai-profiles.json`
 SHA-256 identical before and after, and the only `PaperAI` credential in the
 Windows Credential Manager is the user's own `deepseek` — the test junk is gone.
+
+---
+
+## 12. The 0.4.0 features
+
+Two requests from the user: a whole-article context option, and the free models
+on OpenCode.
+
+### 12.1 整篇文章 (whole-document context mode)
+
+"简要概述这篇文章" is a normal question, and none of the four existing modes can
+answer it: 选中文字 / 当前页 / 相邻三页 are all deliberately narrow, and
+不发送文献 sends nothing.
+
+The mode walks every page, joins the text with `[第 N 页]` markers so answers can
+cite pages, and uses a much larger budget than the single-page modes
+(120,000 characters ≈ 37k tokens, against 26,000) — comfortably inside every
+current model's window.
+
+**The part that needed care is truncation.** A long paper exceeds any budget, and
+the obvious implementation — cut the text, send the prefix — fails in a way that
+is invisible in the output: asked to summarise "the article", the model produces a
+fluent, confident summary of pages 1–6 and calls it the whole paper. Nothing in
+the answer reveals that two thirds of it was never sent.
+
+So the mode is built to be honest about its own coverage:
+
+| Mechanism | Effect |
+|---|---|
+| The walk stops on a **page boundary**, never mid-page | the range reported is exact, not an estimate |
+| `label` becomes `仅发送第 1–6 页 / 共 22 页` | the user sees it before reading the answer |
+| The payload carries an explicit note naming the range and the real total | the model is told, not left to guess |
+| `SYSTEM_PROMPT` rule 7 requires the answer to state the range it used | the transcript says it too |
+| `describeStats()` marks the turn with the same coverage | it survives into the history |
+
+Four tests cover this, including one that would have passed against a broken
+implementation: the first version searched the whole payload for the coverage
+sentence, but the system prompt contains that phrase as well, so the assertion
+could not fail. It now checks the **user turn** specifically.
+
+Page walking is capped at 300 so a 900-page scan cannot become 900 fetches; when
+the cap bites it is reported for the same reason as a budget overflow. Blank and
+scanned pages are skipped without being counted as truncation — otherwise a
+document with two image-only pages would always look incomplete.
+
+### 12.2 OpenCode presets and the live model list
+
+Three presets now ship: DeepSeek 官方, OpenCode Go, OpenCode Zen.
+
+Every base URL was taken from the provider's own documentation and then
+**confirmed against its live `/models` endpoint**. This mattered: the third-party
+sources disagreed with the official docs about whether Go lives at
+`inference/go/v1` or `zen/go/v1`. Both answer, but the documentation is the source
+of truth, so that is what shipped. A guessed base URL fails as a 404 that looks
+like a bad model name, which is the most confusing failure available.
+
+**A factual correction the user's request contained.** They asked for
+`deepseek-v4.1-flash-free` as the Go default. That model is not in the Go
+catalogue — it is a **Zen** model. The two pools are separate services:
+
+| Pool | Models | DeepSeek | Free models |
+|---|---|---|---|
+| Go (`inference/go/v1`) | 37 | `deepseek-v4.1-flash`, `deepseek-v4-pro` | `longcat-2.5-preview-free`, `step-5-preview-free`, `cat-jam-free` |
+| Zen (`zen/v1`) | 87 | `deepseek-v4.1-flash-free` | several |
+
+So the Go preset defaults to `deepseek-v4.1-flash` and the Zen preset defaults to
+`deepseek-v4.1-flash-free` — the model they asked for, on the provider that
+actually serves it. Both catalogues are one click away in the picker.
+
+### 12.3 拉取可用模型
+
+Rather than embedding a model list in the build, the settings dialog fetches the
+provider's live catalogue (`GET {base}/models`) into the Model field's dropdown.
+These catalogues change weekly — a baked-in list is wrong within a release or two
+— and the call works **before a key is stored**, so the free models can be browsed
+first.
+
+Two things the UI states plainly instead of hiding:
+
+* OpenCode serves several families on `/messages` or `/responses` rather than
+  `/chat/completions`. PaperAI speaks only the last one, so those ids are
+  labelled 使用其它接口协议 and warned about before anything is sent. The
+  catalogue returns no protocol metadata (only `id/object/created/owned_by`), so
+  this comes from a small table whose worst case is a misleading hint rather than
+  a wrong request — the model still has to be accepted by the provider.
+* 「可能免费」 is inferred from a `-free` suffix for the same reason: there is no
+  price field to read. It sorts free models to the top and is labelled a guess.
+
+**Key-scoping rule.** `ai_list_models` takes an optional `profile_id`, and a
+stored credential is only ever read for a profile that exists. Passing no profile
+means an unauthenticated request, not "use some key". So the stored key cannot be
+aimed at a host the user never configured.
+
+### 12.4 OpenCode session header
+
+OpenCode's docs make two client requirements, and both are now met:
+a client-specific User-Agent (the app already sent `PaperAI/<version>`) and
+**a stable per-conversation `x-opencode-session`** — "so we can optimize routing
+and prompt caching", with a warning that requests without it may start failing.
+
+It is a per-profile flag (`sends_session_header`), not host sniffing, so what gets
+sent is visible and switchable. The value is a random conversation id regenerated
+by 「新对话」; it is not a credential and is never logged.
+
+Verified end-to-end rather than by inspection: the Mock SSE server records the
+headers it receives, and the runner asserts the header is present with the
+expected value for an OpenCode-style profile **and absent** for an ordinary one.
+22/22 including both.
+
+### 12.5 Also corrected
+
+The DeepSeek preset's default model was `deepseek-chat`, which DeepSeek's current
+docs no longer list — they say to use `deepseek-flash`. A preset that configures a
+retired model name is worse than no preset, so it was updated. It remains a
+*default*: the field is editable and nothing downstream hard-codes it.
+
+### 12.6 Verification
+
+| Suite | 0.3.1 | 0.4.0 |
+|---|---|---|
+| `cargo test --lib` | 43 | **49** |
+| `cargo test --test save_crash_recovery` | 8 | 8 |
+| `run-ai-rust-tests.mjs` (Mock SSE, real socket) | 20 | **22** |
+| `run-ai-unit-tests.mjs` | 48 | **53** |
+| `tests/overlay-visibility.mjs` (headless Chromium) | 15 | 15 |
+| `windows-integration.mjs` | 17 | 17 |
+| `windows-upgrade.mjs` | 13 | 13 |
+| **total** | **164** | **177** |
+
+New tests worth naming: partial-coverage honesty (4), `models_url` joining (2),
+preset validity — every preset must survive the same validation a typed profile
+does, and no two may share a credential slot (3), and the session header present
+/ absent pair (2 e2e, asserted from the recorded request).
+
+`pdfjs-dist` still pinned at 6.4.299.

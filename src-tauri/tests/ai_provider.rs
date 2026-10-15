@@ -96,7 +96,14 @@ fn call(messages: Vec<(&str, &str)>) -> ChatCall {
             .map(|(r, c)| ChatMessage { role: r.into(), content: c.into() })
             .collect(),
         temperature: None,
+        session_id: None,
+        send_session_header: false,
     }
+}
+
+/// Same, but as an OpenCode-style profile that asks for the session header.
+fn call_with_session(messages: Vec<(&str, &str)>, sid: &str) -> ChatCall {
+    ChatCall { session_id: Some(sid.into()), send_session_header: true, ..call(messages) }
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -341,6 +348,9 @@ fn missing_key_fails_before_any_network_call() {
         model: "mock-model".into(),
         messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
         temperature: None,
+        // These two tests are about credential/URL handling, not OpenCode.
+        session_id: None,
+        send_session_header: false,
     };
     let c = run(req);
     match c.terminal() {
@@ -362,6 +372,9 @@ fn plain_http_to_a_remote_host_is_refused() {
         model: "m".into(),
         messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
         temperature: None,
+        // These two tests are about credential/URL handling, not OpenCode.
+        session_id: None,
+        send_session_header: false,
     };
     let c = run(req);
     match c.terminal() {
@@ -405,4 +418,26 @@ fn context_is_sent_verbatim_and_nothing_else() {
     ]));
     // The mock's request log is the authority; see the Node-side assertions in
     // scripts/run-ai-rust-tests.mjs which inspect it after this suite runs.
+}
+
+/// Session id the Node-side runner also knows about. Kept identical on both
+/// sides so the assertion below and the header check in
+/// `scripts/run-ai-rust-tests.mjs` refer to the same value.
+const TEST_SESSION_ID: &str = "paperai-test-session-42";
+
+#[test]
+fn opencode_profiles_send_the_session_header() {
+    need_mock!("happy");
+    let _key = with_key();
+    let _ = run(call_with_session(vec![("user", "ping")], TEST_SESSION_ID));
+    // The header itself is asserted from the mock's request log on the Node
+    // side, where the recorded headers are available.
+}
+
+#[test]
+fn ordinary_profiles_do_not_send_the_session_header() {
+    need_mock!("happy");
+    let _key = with_key();
+    // `call()` leaves send_session_header false, i.e. DeepSeek-style.
+    let _ = run(call(vec![("user", "ping")]));
 }

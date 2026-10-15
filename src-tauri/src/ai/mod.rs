@@ -53,10 +53,50 @@ pub fn ai_list_profiles() -> Vec<ProfileStatus> {
     settings::load().iter().map(settings::status_of).collect()
 }
 
-/// The preset the UI offers when the user adds a provider.
+/// The provider presets the UI offers. Every base URL in here was taken from the
+/// provider's own documentation and checked against its live `/models`
+/// endpoint — see `settings::presets`.
 #[tauri::command]
-pub fn ai_deepseek_preset() -> AiProfile {
-    settings::deepseek_preset()
+pub fn ai_provider_presets() -> Vec<AiProfile> {
+    settings::presets()
+}
+
+/// Fetch a provider's live model catalogue so the user picks from what the
+/// provider currently serves rather than from a list baked into this build.
+///
+/// `profile_id` is optional so the catalogue can be browsed **before** anything
+/// is saved — OpenCode's endpoints answer unauthenticated, which is what makes
+/// it possible to look at the free models first. When a profile *is* given, its
+/// stored key is used.
+///
+/// Key-scoping rule: a credential is only ever read for a saved profile, so the
+/// stored key cannot be aimed at a host the user never configured. Passing no
+/// profile means an unauthenticated request, not "use some key".
+#[tauri::command]
+pub async fn ai_list_models(
+    state: State<'_, AiState>,
+    base_url: String,
+    profile_id: Option<String>,
+    send_session_header: Option<bool>,
+) -> Result<Vec<ModelOption>, AppError> {
+    // Validate before the network so a bad URL fails fast with a precise code.
+    config::normalize_base_url(&base_url)?;
+
+    let (credential_id, session_header) = match profile_id {
+        Some(id) if !id.trim().is_empty() => {
+            let p = settings::get(&id)?;
+            (Some(p.credential_id), p.sends_session_header)
+        }
+        _ => (None, send_session_header.unwrap_or(false)),
+    };
+
+    provider::list_models(
+        state.provider.http(),
+        credential_id.as_deref(),
+        &base_url,
+        session_header,
+    )
+    .await
 }
 
 /// Create or update a profile. Base URL is validated and normalised here.
@@ -115,7 +155,14 @@ pub async fn ai_test_connection(
     if mdl.trim().is_empty() {
         return Err(AppError::new(codes::AI_BAD_CONFIG, "模型名不能为空"));
     }
-    Ok(provider::probe_connection(state.provider.http(), &p.credential_id, &base, &mdl).await)
+    Ok(provider::probe_connection(
+        state.provider.http(),
+        &p.credential_id,
+        &base,
+        &mdl,
+        p.sends_session_header,
+    )
+    .await)
 }
 
 /// Start a streamed completion.
@@ -130,6 +177,11 @@ pub async fn ai_start_chat(
     profile_id: String,
     messages: Vec<ChatMessage>,
     temperature: Option<f32>,
+    // Stable per-conversation id from the frontend. Sent as
+    // `x-opencode-session` for profiles that ask for it (see
+    // `AiProfile::sends_session_header`). It is a random conversation id, not a
+    // credential, and is never logged.
+    session_id: Option<String>,
     sink: Channel<AiStreamEvent>,
 ) -> Result<(), AppError> {
     if request_id.trim().is_empty() {
@@ -158,6 +210,8 @@ pub async fn ai_start_chat(
         model: profile.model.clone(),
         messages,
         temperature,
+        session_id,
+        send_session_header: profile.sends_session_header,
     };
 
     let fut = provider.clone().start_chat(call, sink, cancel);

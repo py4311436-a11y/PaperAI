@@ -122,6 +122,20 @@ pub fn display_url(url: &str) -> String {
     url.to_string()
 }
 
+/// Join the model-catalogue path onto a normalised base URL.
+///
+/// Most OpenAI-compatible gateways answer `GET {base}/models` with
+/// `{"object":"list","data":[{"id":...}]}`. Fetching it is how the UI offers the
+/// *live* model list instead of a hard-coded one that goes stale — the OpenCode
+/// Zen catalogue, for instance, gained and retired several ids within weeks.
+pub fn models_url(base_url: &str) -> AppResult<String> {
+    let base = normalize_base_url(base_url)?;
+    if base.ends_with("/models") {
+        return Ok(base);
+    }
+    Ok(format!("{base}/models"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +193,34 @@ mod tests {
         );
         assert_eq!(chat_completions_url("ftp://x.com").unwrap_err().code, codes::AI_BAD_CONFIG);
         assert_eq!(chat_completions_url("").unwrap_err().code, codes::AI_BAD_CONFIG);
+    }
+
+    #[test]
+    fn models_url_joins_without_doubling() {
+        assert_eq!(
+            models_url("https://opencode.ai/zen/v1").unwrap(),
+            "https://opencode.ai/zen/v1/models"
+        );
+        assert_eq!(
+            models_url("https://opencode.ai/zen/v1/").unwrap(),
+            "https://opencode.ai/zen/v1/models"
+        );
+        assert_eq!(models_url("https://api.deepseek.com").unwrap(), "https://api.deepseek.com/models");
+        // Idempotent if the user pasted the endpoint itself.
+        assert_eq!(
+            models_url("https://opencode.ai/zen/v1/models").unwrap(),
+            "https://opencode.ai/zen/v1/models"
+        );
+        assert!(!models_url("https://opencode.ai/zen/v1").unwrap().contains("/v1/v1"));
+    }
+
+    #[test]
+    fn models_url_applies_the_same_transport_policy() {
+        assert_eq!(
+            models_url("http://api.deepseek.com/v1").unwrap_err().code,
+            codes::AI_INSECURE_REFUSED
+        );
+        assert!(models_url("http://127.0.0.1:8788/v1").is_ok());
+        assert_eq!(models_url("").unwrap_err().code, codes::AI_BAD_CONFIG);
     }
 }

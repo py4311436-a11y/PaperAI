@@ -1,6 +1,6 @@
 # Rust provider integration suite (against local Mock SSE)
 
-Generated: 2026-10-15T13:05:10.011Z
+Generated: 2026-10-15T14:10:49.549Z
 Runner: scripts/run-ai-rust-tests.mjs
 
 | Test | Mock scenario | Result | Requests seen by mock |
@@ -25,8 +25,10 @@ Runner: scripts/run-ai-rust-tests.mjs
 | plain_http_to_a_remote_host_is_refused | happy | **PASS** | 0 |
 | cancel_stops_the_stream_promptly | slow | **PASS** | 1 |
 | context_is_sent_verbatim_and_nothing_else | happy | **PASS** | 1 |
+| opencode_profiles_send_the_session_header | happy | **PASS** | 1 |
+| ordinary_profiles_do_not_send_the_session_header | happy | **PASS** | 1 |
 
-**20/20 PASS**
+**22/22 PASS**
 
 The mock redacts `Authorization` before recording, so
 `rust-provider-requests.json` is safe to archive as evidence.

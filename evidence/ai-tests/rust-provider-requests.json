@@ -7,6 +7,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -26,6 +27,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -45,6 +47,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -64,6 +67,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -83,6 +87,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -102,6 +107,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -121,6 +127,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -140,6 +147,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -159,6 +167,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -178,6 +187,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -197,6 +207,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -216,6 +227,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -235,6 +247,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -254,6 +267,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -273,6 +287,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -292,6 +307,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -311,6 +327,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -330,6 +347,7 @@
     "authorization": "Bearer <redacted:18chars>",
     "contentType": "application/json",
     "accept": "text/event-stream",
+    "sessionHeader": null,
     "body": {
       "messages": [
         {
@@ -338,6 +356,46 @@
         },
         {
           "content": "解释：<document_context>测试片段</document_context>",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "opencode_profiles_send_the_session_header",
+    "scenario": "happy",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": "paperai-test-session-42",
+    "body": {
+      "messages": [
+        {
+          "content": "ping",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "ordinary_profiles_do_not_send_the_session_header",
+    "scenario": "happy",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "ping",
           "role": "user"
         }
       ],

@@ -49,7 +49,37 @@ const PLAN = [
   ["plain_http_to_a_remote_host_is_refused", "happy"],
   ["cancel_stops_the_stream_promptly", "slow"],
   ["context_is_sent_verbatim_and_nothing_else", "happy"],
+  ["opencode_profiles_send_the_session_header", "happy"],
+  ["ordinary_profiles_do_not_send_the_session_header", "happy"],
 ];
+
+/** Must match `TEST_SESSION_ID` in src-tauri/tests/ai_provider.rs. */
+const TEST_SESSION_ID = "paperai-test-session-42";
+
+/**
+ * Header expectations that can only be checked from here, because the mock's
+ * request log is what holds the received headers.
+ *
+ * OpenCode's gateway documents `x-opencode-session` as a client requirement, so
+ * "we set the flag" is not enough — this asserts the byte actually went out,
+ * and that a profile which did not ask for it does not send it.
+ */
+function checkHeaders(test, mock) {
+  const got = mock.requests[0]?.headers?.["x-opencode-session"];
+  if (test === "opencode_profiles_send_the_session_header") {
+    return {
+      ok: got === TEST_SESSION_ID,
+      note: got === undefined ? "x-opencode-session 缺失" : `x-opencode-session=${got}`,
+    };
+  }
+  if (test === "ordinary_profiles_do_not_send_the_session_header") {
+    return {
+      ok: got === undefined,
+      note: got === undefined ? "未发送（符合预期）" : `不该发送却发送了：${got}`,
+    };
+  }
+  return null;
+}
 
 /** Async spawn: `spawnSync` would block this process's event loop, and the
  *  Mock SSE server lives in this very process — it would never accept the
@@ -107,14 +137,34 @@ for (const [test, scenario] of PLAN) {
       authorization: req.headers.authorization ?? null,
       contentType: req.headers["content-type"] ?? null,
       accept: req.headers.accept ?? null,
+      sessionHeader: req.headers["x-opencode-session"] ?? null,
       body: req.body,
     });
   }
 
-  results.push({ test, scenario, passed, skipped, requests: mock.requests.length });
-  const mark = passed ? "PASS" : skipped ? "BLOCKED" : "FAIL";
-  console.log(`[${mark.padEnd(8)}] ${test}  (mock=${scenario}, ${mock.requests.length} req)`);
-  if (!passed) {
+  // Header assertions live here, not in Rust: the received headers are only
+  // visible in this process.
+  const headerCheck = checkHeaders(test, mock);
+  const headerOk = !headerCheck || headerCheck.ok;
+  const effectivePassed = passed && headerOk;
+
+  results.push({
+    test,
+    scenario,
+    passed: effectivePassed,
+    skipped,
+    requests: mock.requests.length,
+    headerNote: headerCheck?.note ?? null,
+  });
+  const mark = effectivePassed ? "PASS" : skipped ? "BLOCKED" : "FAIL";
+  console.log(
+    `[${mark.padEnd(8)}] ${test}  (mock=${scenario}, ${mock.requests.length} req)` +
+      (headerCheck ? `  — ${headerCheck.note}` : "")
+  );
+  if (!effectivePassed) {
+    if (!headerCheck?.ok) {
+      console.log(`            header assertion failed: ${headerCheck?.note}`);
+    }
     console.log(
       out
         .split(/\r?\n/)

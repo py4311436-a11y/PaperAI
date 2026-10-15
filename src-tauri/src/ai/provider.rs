@@ -22,9 +22,10 @@ use tokio::sync::watch;
 use crate::error::{codes, AppError, AppResult};
 
 use super::client::{self, classify_status, classify_transport, CONNECT_TIMEOUT, FIRST_TOKEN_TIMEOUT};
+use super::{config, settings};
 use super::secrets;
 use super::stream::{SseEvent, SseParser};
-use super::types::{AiStreamEvent, ChatMessage, ConnectionTest};
+use super::types::{AiStreamEvent, ChatMessage, ConnectionTest, ModelOption};
 
 /// A future produced by a provider. Boxed and `Send` so it can be spawned on
 /// the app runtime and outlive the IPC call that started it.
@@ -60,6 +61,29 @@ pub struct ChatCall {
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub temperature: Option<f32>,
+    /// Stable per-conversation id, sent as `x-opencode-session` when the
+    /// profile asks for it. Never derived from a credential.
+    pub session_id: Option<String>,
+    /// See `AiProfile::sends_session_header`.
+    pub send_session_header: bool,
+}
+
+/// Attach the OpenCode session header when the profile asks for it.
+///
+/// Their gateway documents this as a requirement ("Send a stable session ID in
+/// `x-opencode-session` for each conversation so we can optimize routing and
+/// prompt caching") and warns that requests without it may start failing. The
+/// value is a random conversation id, not a secret. Sent to every provider that
+/// has the flag on and to nobody else — this is not host sniffing.
+fn with_session(
+    rb: reqwest::RequestBuilder,
+    send: bool,
+    session_id: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match (send, session_id) {
+        (true, Some(sid)) if !sid.trim().is_empty() => rb.header("x-opencode-session", sid),
+        _ => rb,
+    }
 }
 
 /// OpenAI-compatible Chat Completions provider.
@@ -115,15 +139,19 @@ where
 
     let payload = build_body(&req.model, &req.messages, req.temperature, true);
 
-    let send = provider
-        .http
-        .post(&target.url)
-        .header("Authorization", auth)
-        .header("Content-Type", "application/json")
-        .header("Accept", "text/event-stream")
-        .timeout(CONNECT_TIMEOUT)
-        .json(&payload)
-        .send();
+    let send = with_session(
+        provider
+            .http
+            .post(&target.url)
+            .header("Authorization", auth)
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .timeout(CONNECT_TIMEOUT),
+        req.send_session_header,
+        req.session_id.as_deref(),
+    )
+    .json(&payload)
+    .send();
 
     let resp = tokio::select! {
         biased;
@@ -305,6 +333,7 @@ pub async fn probe_connection(
     profile_id: &str,
     base_url: &str,
     model: &str,
+    send_session_header: bool,
 ) -> ConnectionTest {
     let started = Instant::now();
     let elapsed = |t: &Instant| t.elapsed().as_millis() as u64;
@@ -331,14 +360,19 @@ pub async fn probe_connection(
         "max_tokens": 1
     });
 
-    let resp = http
-        .post(&target.url)
-        .header("Authorization", auth)
-        .header("Content-Type", "application/json")
-        .timeout(CONNECT_TIMEOUT + std::time::Duration::from_secs(20))
-        .json(&payload)
-        .send()
-        .await;
+    let resp = with_session(
+        http.post(&target.url)
+            .header("Authorization", auth)
+            .header("Content-Type", "application/json")
+            .timeout(CONNECT_TIMEOUT + std::time::Duration::from_secs(20)),
+        send_session_header,
+        // A probe is not a conversation; a fixed id is enough to satisfy the
+        // gateway and keeps the request a fair sample of the real ones.
+        Some("paperai-probe"),
+    )
+    .json(&payload)
+    .send()
+    .await;
 
     match resp {
         Err(e) => bad(classify_transport(&e), elapsed(&started)),
@@ -372,6 +406,118 @@ fn bad(e: AppError, ms: u64) -> ConnectionTest {
         elapsed_ms: ms,
         model_echo: None,
     }
+}
+
+/// Fetch a provider's live model catalogue.
+///
+/// This exists so the UI never has to ship a hard-coded model list: OpenCode's
+/// catalogue gained and retired several ids within weeks, and any list baked
+/// into the app is wrong within a release or two. The endpoint is
+/// `GET {base}/models` and the shape is the OpenAI convention
+/// (`{"object":"list","data":[{"id":...}]}`).
+///
+/// The key is optional on purpose — some gateways (OpenCode Zen and Go among
+/// them) serve their catalogue unauthenticated, so a user can browse free models
+/// before deciding to create a key. When a credential id *is* given it is sent,
+/// because some providers list a different, per-account subset when
+/// authenticated.
+///
+/// Every id is annotated with [`protocol_hint`] so the UI can warn about models
+/// the provider serves on a different protocol than the one this app speaks.
+pub async fn list_models(
+    http: &reqwest::Client,
+    credential_id: Option<&str>,
+    base_url: &str,
+    send_session_header: bool,
+) -> Result<Vec<ModelOption>, AppError> {
+    let url = config::models_url(base_url)?;
+
+    let auth = credential_id
+        .and_then(|id| secrets::read_secret(id).ok())
+        .map(|k| format!("Bearer {k}"));
+
+    let mut rb = with_session(
+        http.get(&url)
+            .header("Accept", "application/json")
+            .timeout(CONNECT_TIMEOUT + std::time::Duration::from_secs(20)),
+        send_session_header,
+        Some("paperai-models"),
+    );
+    if let Some(a) = auth {
+        rb = rb.header("Authorization", a);
+    }
+
+    let resp = rb.send().await.map_err(|e| classify_transport(&e))?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        // Include the resolved URL: a wrong base URL is the most likely cause,
+        // and "no models" alone gives the user nothing to act on.
+        let e = classify_status(status.as_u16(), &body);
+        return Err(AppError::new(&e.code, format!("{}（请求 {url}）", e.message)));
+    }
+
+    let ids = parse_model_ids(&body)
+        .ok_or_else(|| {
+            AppError::new(
+                codes::AI_BAD_STREAM,
+                format!(
+                    "无法解析模型列表：{url} 的返回不是 OpenAI 兼容的 \
+                     {{\"data\":[{{\"id\":…}}]}} 结构。请确认 Base URL 指向服务根路径。"
+                ),
+            )
+        })?;
+
+    // Free models first, then alphabetical. Purely a convenience ordering: the
+    // catalogue can be dozens of ids and the free ones are what a user trying
+    // a provider out wants to see. `free_hint` is a name-based inference, so it
+    // is used only for sorting.
+    let mut options: Vec<ModelOption> = ids
+        .into_iter()
+        .map(|id| ModelOption {
+            compatibility: settings::protocol_hint(&id).to_string(),
+            free_hint: id.to_ascii_lowercase().ends_with("-free"),
+            id,
+        })
+        .collect();
+    options.sort_by(|a, b| {
+        b.free_hint
+            .cmp(&a.free_hint)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    Ok(options)
+}
+
+/// Pull model ids out of the several shapes providers actually return.
+///
+/// The OpenAI convention is the target, but a bare array and a top-level
+/// `models` key both occur in the wild; accepting them costs three lines and
+/// avoids a confusing failure on a perfectly good endpoint.
+fn parse_model_ids(body: &str) -> Option<Vec<String>> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let arr = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| v.get("models").and_then(|m| m.as_array()))
+        .or_else(|| v.as_array())?;
+
+    let mut ids: Vec<String> = arr
+        .iter()
+        .filter_map(|m| {
+            m.get("id")
+                .and_then(|i| i.as_str())
+                // A bare array of strings.
+                .or_else(|| m.as_str())
+                .map(str::to_string)
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    ids.sort();
+    ids.dedup();
+    Some(ids)
 }
 
 #[cfg(test)]

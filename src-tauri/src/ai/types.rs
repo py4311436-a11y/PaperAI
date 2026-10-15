@@ -20,6 +20,17 @@ pub struct AiProfile {
     /// Whether this profile is the default one.
     #[serde(default)]
     pub is_default: bool,
+    /// Send a stable `x-opencode-session` header on every request.
+    ///
+    /// OpenCode's gateway asks every client to identify the conversation this
+    /// way ("Send a stable session ID in `x-opencode-session` for each
+    /// conversation so we can optimize routing and prompt caching"), and its
+    /// docs warn that requests without it may start failing. It is a
+    /// per-profile flag rather than host sniffing so the behaviour is visible
+    /// and switchable. The value is a random id for the conversation — never a
+    /// credential — so nothing here is a secret.
+    #[serde(default)]
+    pub sends_session_header: bool,
 }
 
 /// What the UI is allowed to know about a profile's credential state.
@@ -34,6 +45,28 @@ pub struct ProfileStatus {
     pub has_key: bool,
     /// Loopback + plain HTTP: shown in the UI as "本地非加密连接".
     pub is_loopback_insecure: bool,
+    pub sends_session_header: bool,
+}
+
+/// One entry from a provider's model catalogue.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelOption {
+    pub id: String,
+    /// `chat` — known to work with the OpenAI-compatible `/chat/completions`
+    /// endpoint this app speaks.
+    /// `incompatible` — served by the provider on a different protocol
+    /// (`/messages`, `/responses`), so selecting it here would fail.
+    /// `unknown` — the provider does not distinguish; the usual case, and
+    /// normally fine.
+    pub compatibility: String,
+    /// **Inferred**, not authoritative: true when the id ends in `-free`.
+    ///
+    /// OpenCode's catalogue endpoint returns only `id / object / created /
+    /// owned_by` — there is no price field to read — so the name is the only
+    /// signal available. The UI labels it as a guess for that reason. It is
+    /// used solely to sort free models to the top of the list; nothing
+    /// downstream depends on it.
+    pub free_hint: bool,
 }
 
 /// A chat message as sent by the frontend. `role` is validated in Rust.

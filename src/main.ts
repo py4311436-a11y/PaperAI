@@ -140,8 +140,8 @@ const panel = new ChatPanel({
 });
 
 const chat = new ChatController({
-  startChat: (id, profileId, messages, onEvent, temperature) =>
-    bridge.aiStartChat(id, profileId, messages, onEvent, temperature),
+  startChat: (id, profileId, messages, onEvent, temperature, sessionId) =>
+    bridge.aiStartChat(id, profileId, messages, onEvent, temperature, sessionId),
   cancelChat: (id) => bridge.aiCancelChat(id),
   onChange: () => renderChat(),
   newId: () => `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -149,7 +149,9 @@ const chat = new ChatController({
 
 const settings = new ProviderSettings({
   list: () => bridge.aiListProfiles(),
-  preset: () => bridge.aiDeepSeekPreset(),
+  presets: () => bridge.aiProviderPresets(),
+  listModels: (baseUrl, profileId, sendSessionHeader) =>
+    bridge.aiListModels(baseUrl, profileId, sendSessionHeader),
   save: (p) => bridge.aiSaveProfile(p),
   remove: (id, del) => bridge.aiDeleteProfile(id, del),
   setKey: (id, k) => bridge.aiSetKey(id, k),

@@ -12,6 +12,12 @@ export interface AiProfile {
   model: string;
   credential_id: string;
   is_default: boolean;
+  /**
+   * Send a stable `x-opencode-session` header on every request. OpenCode's
+   * gateway asks clients for this (routing + prompt caching) and warns that
+   * requests without it may start failing. A conversation id, not a secret.
+   */
+  sends_session_header: boolean;
 }
 
 export interface ProfileStatus {
@@ -23,6 +29,20 @@ export interface ProfileStatus {
   has_key: boolean;
   /** Plain HTTP to this machine — shown in the UI as an explicit warning. */
   is_loopback_insecure: boolean;
+  sends_session_header: boolean;
+}
+
+/** One entry from a provider's live model catalogue. */
+export interface ModelOption {
+  id: string;
+  /**
+   * `incompatible` — the provider serves this model on a different protocol
+   * (`/messages`, `/responses`) than the OpenAI-compatible one this app speaks.
+   * `unknown` — the usual case, and normally fine.
+   */
+  compatibility: "chat" | "incompatible" | "unknown" | string;
+  /** Inferred from a `-free` suffix; used only to sort, never as fact. */
+  free_hint: boolean;
 }
 
 export interface ConnectionTest {
@@ -45,14 +65,27 @@ export type AiStreamEvent =
   | { type: "cancelled" }
   | { type: "error"; code: string; safe_message: string };
 
-/** Context modes. `none` is the only one that sends no document text. */
-export type ContextMode = "none" | "selection" | "current-page" | "nearby-pages";
+/**
+ * Context modes. `none` is the only one that sends no document text.
+ *
+ * `whole-document` is the expensive one: it walks every page. It exists because
+ * "简要概述这篇文章" is a normal thing to ask, and no per-page mode can answer
+ * it honestly.
+ */
+export type ContextMode =
+  | "none"
+  | "selection"
+  | "current-page"
+  | "nearby-pages"
+  | "whole-document";
 
 export interface ContextStats {
   chars: number;
   approx_tokens: number;
   truncated: boolean;
   pages_sent: number[];
+  /** Total pages in the document, so the UI can show real coverage. */
+  pages_total: number;
 }
 
 /** A frozen copy of a PDF text selection. */

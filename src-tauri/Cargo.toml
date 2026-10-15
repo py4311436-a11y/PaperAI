@@ -1,6 +1,6 @@
 [package]
 name = "paperai"
-version = "0.3.1"
+version = "0.4.0"
 description = "PaperAI — Read · Annotate · Ask (Windows PDF reader)"
 authors = ["PaperAI"]
 edition = "2021"

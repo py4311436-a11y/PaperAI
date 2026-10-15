@@ -160,6 +160,7 @@ import type {
   AiStreamEvent,
   ChatMessage,
   ConnectionTest,
+  ModelOption,
   ProfileStatus,
 } from "./ai/types";
 import { Channel } from "@tauri-apps/api/core";
@@ -168,8 +169,29 @@ export async function aiListProfiles(): Promise<ProfileStatus[]> {
   return await invoke<ProfileStatus[]>("ai_list_profiles");
 }
 
-export async function aiDeepSeekPreset(): Promise<AiProfile> {
-  return await invoke<AiProfile>("ai_deepseek_preset");
+export async function aiProviderPresets(): Promise<AiProfile[]> {
+  return await invoke<AiProfile[]>("ai_provider_presets");
+}
+
+/**
+ * Fetch the provider's live model catalogue.
+ *
+ * Deliberately a network call rather than a list shipped in the app: provider
+ * catalogues change weekly, so any baked-in list is wrong within a release.
+ * Works with no profile at all — OpenCode's catalogue answers unauthenticated,
+ * so the free models can be browsed before anything is saved. A key is only
+ * ever used when `profileId` names a saved profile.
+ */
+export async function aiListModels(
+  baseUrl: string,
+  profileId?: string,
+  sendSessionHeader?: boolean
+): Promise<ModelOption[]> {
+  return await invoke<ModelOption[]>("ai_list_models", {
+    baseUrl,
+    profileId: profileId ?? null,
+    sendSessionHeader: sendSessionHeader ?? null,
+  });
 }
 
 export async function aiSaveProfile(profile: AiProfile): Promise<ProfileStatus> {
@@ -228,7 +250,13 @@ export async function aiStartChat(
   profileId: string,
   messages: ChatMessage[],
   onEvent: (ev: AiStreamEvent) => void,
-  temperature?: number
+  temperature?: number,
+  /**
+   * Stable id for this conversation. Rust forwards it as `x-opencode-session`
+   * for profiles that ask for it, and ignores it otherwise. A random
+   * conversation id, never a credential.
+   */
+  sessionId?: string
 ): Promise<void> {
   const channel = new Channel<AiStreamEvent>();
   channel.onmessage = onEvent;
@@ -237,6 +265,7 @@ export async function aiStartChat(
     profileId,
     messages,
     temperature,
+    sessionId: sessionId ?? null,
     sink: channel,
   });
 }

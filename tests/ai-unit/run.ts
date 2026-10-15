@@ -126,6 +126,117 @@ test("mode nearby-pages sends p-1, p, p+1 and clamps at the edges", async () => 
   assert.deepEqual(atEnd, [9, 10], "last page has no page 11");
 });
 
+// ------------------------------------------------ context: whole document
+
+test("whole-document sends every page with page markers", async () => {
+  const seen = [];
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 4,
+    getPageText: async (p) => {
+      seen.push(p);
+      return `BODY ${p}`;
+    },
+  });
+  assert.deepEqual(seen, [1, 2, 3, 4], "must walk every page");
+  const joined = built.messages.map((m) => m.content).join("\n");
+  for (const n of [1, 2, 3, 4]) assert.ok(joined.includes(`[第 ${n} 页]`), `page marker ${n} missing`);
+  assert.equal(built.stats.truncated, false, "a short document must not be reported as truncated");
+  assert.deepEqual(built.stats.pages_sent, [1, 2, 3, 4]);
+  assert.equal(built.stats.pages_total, 4);
+});
+
+test("whole-document skips pages with no extractable text but still reports the total", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 5,
+    // Page 2 is a scanned image; page 4 is blank.
+    getPageText: async (p) => (p === 2 || p === 4 ? "   \n  " : `BODY ${p}`),
+  });
+  assert.deepEqual(built.stats.pages_sent, [1, 3, 5]);
+  assert.equal(
+    built.stats.truncated,
+    false,
+    "blank pages are not truncation — reporting them as such would be a false alarm"
+  );
+  assert.equal(built.stats.pages_total, 5);
+});
+
+test("whole-document that overflows names the pages it actually sent", async () => {
+  // Each page is ~1000 chars, so a 2500-char budget fits two of them.
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 20,
+    charLimit: 2500,
+    getPageText: async (p) => `P${p} ` + "x".repeat(1000),
+  });
+
+  assert.equal(built.stats.truncated, true);
+  assert.equal(built.stats.pages_total, 20, "the total must be the real page count");
+  assert.ok(
+    built.stats.pages_sent.length < 20,
+    `expected a partial send, got ${built.stats.pages_sent.length} pages`
+  );
+  assert.deepEqual(
+    built.stats.pages_sent,
+    [1, 2],
+    "the budget must stop the walk, not cut the text at an arbitrary offset"
+  );
+
+  const joined = built.messages.map((m) => m.content).join("\n");
+  // Assert on the USER turn specifically. The system prompt also mentions
+  // "部分内容" (it instructs the model how to behave when told the context is
+  // partial), so searching the whole payload would pass even if the coverage
+  // note were never emitted — a test that cannot fail.
+  const userTurn = built.messages[built.messages.length - 1].content;
+
+  // The model MUST be told it is looking at part of the paper. Without this it
+  // answers "简要概述这篇文章" with a confident summary of pages 1-2 and calls
+  // it the whole article — and nothing in the output reveals the truncation.
+  assert.ok(
+    userTurn.includes("部分内容"),
+    "the payload must state that the context is partial"
+  );
+  assert.ok(userTurn.includes("第 1–2 页"), "it must name the range that was sent");
+  assert.ok(userTurn.includes("共 20 页"), "it must name the real total");
+
+  // And the label shown to the user must say the same thing.
+  assert.ok(/仅发送第 1–2 页/.test(built.label), `label was: ${built.label}`);
+  assert.ok(/共 20 页/.test(built.label), `label was: ${built.label}`);
+  assert.ok(joined.length > 0);
+});
+
+test("whole-document does not present a partial send as complete", async () => {
+  // Boundary: the budget fits everything, so nothing may be flagged.
+  const fits = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 3,
+    charLimit: 100000,
+    getPageText: async (p) => `BODY ${p}`,
+  });
+  assert.equal(fits.stats.truncated, false);
+  const userTurn = fits.messages[fits.messages.length - 1].content;
+  assert.ok(!userTurn.includes("部分内容"), "must not claim partial coverage when it is complete");
+  assert.ok(!/仅发送/.test(fits.label), `label was: ${fits.label}`);
+});
+
+test("whole-document still sends something when one page alone overflows the budget", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 3,
+    charLimit: 400,
+    getPageText: async (p) => `P${p} ` + "y".repeat(5000),
+  });
+  assert.equal(built.stats.truncated, true);
+  assert.deepEqual(built.stats.pages_sent, [1], "the first page must still be sent, truncated");
+  assert.ok(built.messages.map((m) => m.content).join("\n").includes("P1"));
+});
+
 test("current page is clamped to the real page count", async () => {
   const seen = [];
   await buildContext({
@@ -266,7 +377,7 @@ function makeController(behaviour?: (emit: (ev: any) => void) => Promise<void>) 
   return { c, listeners };
 }
 
-const built = { contextLabel: "第 1 页", stats: { chars: 10, approx_tokens: 4, truncated: false, pages_sent: [1] } };
+const built = { contextLabel: "第 1 页", stats: { chars: 10, approx_tokens: 4, truncated: false, pages_sent: [1], pages_total: 1 } };
 
 test("send appends a user turn and streams the assistant turn", async () => {
   const { c } = makeController(async (emit) => {

@@ -10,7 +10,7 @@
  *     amount, so saving settings is never disguised as a free probe.
  */
 
-import type { AiProfile, ProfileStatus } from "./types";
+import type { AiProfile, ModelOption, ProfileStatus } from "./types";
 
 /** Edit state = the persisted profile plus the credential *state* (never value). */
 interface EditState extends AiProfile {
@@ -19,7 +19,17 @@ interface EditState extends AiProfile {
 
 export interface SettingsDeps {
   list: () => Promise<ProfileStatus[]>;
-  preset: () => Promise<AiProfile>;
+  /** Built-in provider presets. Fetched once per dialog open. */
+  presets: () => Promise<AiProfile[]>;
+  /**
+   * The provider's live model catalogue. A network call, not a local list:
+   * catalogues change weekly, so anything shipped in the app goes stale.
+   */
+  listModels: (
+    baseUrl: string,
+    profileId?: string,
+    sendSessionHeader?: boolean
+  ) => Promise<ModelOption[]>;
   save: (p: AiProfile) => Promise<ProfileStatus>;
   remove: (id: string, deleteCredential: boolean) => Promise<void>;
   setKey: (id: string, key: string) => Promise<void>;
@@ -32,6 +42,12 @@ export class ProviderSettings {
   private overlay: HTMLElement;
   private profiles: ProfileStatus[] = [];
   private editing: EditState | null = null;
+  /** Cached for the lifetime of one dialog open; presets are static. */
+  private availablePresets: AiProfile[] = [];
+  /** Live catalogue from the last successful fetch, for the model hint. */
+  private lastModels: ModelOption[] = [];
+  private modelList: HTMLDataListElement | null = null;
+  private modelHint: HTMLElement | null = null;
 
   constructor(private deps: SettingsDeps) {
     this.overlay = document.createElement("div");
@@ -56,7 +72,93 @@ export class ProviderSettings {
     document.body.appendChild(this.overlay);
     this.overlay.hidden = false;
     document.addEventListener("keydown", this.onKeydown);
+    try {
+      this.availablePresets = await this.deps.presets();
+    } catch {
+      // A missing preset list must not prevent the dialog from opening; the
+      // custom-provider path still works.
+      this.availablePresets = [];
+    }
     await this.reload();
+  }
+
+  /**
+   * Pull the provider's live catalogue into the datalist.
+   *
+   * Deliberately a separate, explicit action rather than something that happens
+   * on save: it is a network request to a third party, and the user should be
+   * the one deciding when that happens.
+   */
+  private async fetchModels(): Promise<void> {
+    const e = this.editing;
+    if (!e) return;
+    if (!e.base_url || e.base_url === "https://") {
+      this.setStatus("请先填写 Base URL。", "warn");
+      return;
+    }
+    this.setStatus("正在拉取模型列表…", "warn");
+    try {
+      // The profile may not be saved yet, so the id is passed as a hint only —
+      // Rust ignores it unless it names a saved profile, which is what keeps a
+      // stored key from being sent to a host it was never configured for.
+      const models = await this.deps.listModels(e.base_url, e.id, e.sends_session_header);
+      this.lastModels = models;
+      if (this.modelList) {
+        this.modelList.textContent = "";
+        for (const m of models) {
+          const o = document.createElement("option");
+          o.value = m.id;
+          if (m.compatibility === "incompatible") {
+            o.label = `${m.id} — 该模型使用其它接口协议，PaperAI 无法调用`;
+          } else if (m.free_hint) {
+            o.label = `${m.id} — 名称含 -free，可能免费`;
+          }
+          this.modelList.appendChild(o);
+        }
+      }
+      const incompatible = models.filter((m) => m.compatibility === "incompatible").length;
+      const free = models.filter((m) => m.free_hint).length;
+      this.setStatus(
+        `已拉取 ${models.length} 个模型，点 Model 输入框可下拉选择。` +
+          (free ? `其中 ${free} 个名称含 -free（可能免费）。` : "") +
+          (incompatible ? `有 ${incompatible} 个使用其它协议，已标注。` : ""),
+        "ok"
+      );
+      this.updateModelHint();
+    } catch (err) {
+      this.lastModels = [];
+      if (this.modelList) this.modelList.textContent = "";
+      this.setStatus(describe(err), "err");
+      this.updateModelHint();
+    }
+  }
+
+  /**
+   * Warn about the current model *before* the request is attempted.
+   *
+   * Some providers serve part of their catalogue on `/messages` or `/responses`
+   * and give no metadata saying so; picking one produces an error that looks
+   * like a bad model name. Saying it here is cheaper than debugging it later.
+   */
+  private updateModelHint(): void {
+    if (!this.modelHint) return;
+    const e = this.editing;
+    if (!e) {
+      this.modelHint.textContent = "";
+      return;
+    }
+    const known = this.lastModels.find((m) => m.id === e.model.trim());
+    if (known?.compatibility === "incompatible") {
+      this.modelHint.textContent =
+        `⚠ 该模型（${known.id}）由服务商在另一个接口协议上提供，` +
+        `PaperAI 只支持 OpenAI 兼容的 /chat/completions，调用会失败。请另选一个。`;
+      this.modelHint.className = "ais-note ais-warn";
+      return;
+    }
+    this.modelHint.className = "ais-note";
+    this.modelHint.textContent = this.lastModels.length
+      ? `已拉取 ${this.lastModels.length} 个模型。列表来自服务商实时接口，可能随时变化。`
+      : "";
   }
 
   hide(): void {
@@ -79,6 +181,11 @@ export class ProviderSettings {
 
   private render(): void {
     this.overlay.textContent = "";
+    // `textContent = ""` detaches the previous datalist and hint; they are
+    // rebuilt below, so drop the stale references rather than writing into
+    // nodes that are no longer in the document.
+    this.modelList = null;
+    this.modelHint = null;
     const card = document.createElement("div");
     card.className = "ais-card";
 
@@ -113,19 +220,44 @@ export class ProviderSettings {
     });
     card.appendChild(row("Provider", picker));
 
+    // --- presets ------------------------------------------------------------
+    // Buttons rather than a dropdown: there are few of them and each one is a
+    // complete, verified configuration (base URL + a model known to work).
+    if (this.availablePresets.length) {
+      const presetWrap = document.createElement("div");
+      presetWrap.className = "ais-presets";
+      for (const preset of this.availablePresets) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ais-preset";
+        b.id = `ais-preset-${preset.id}`;
+        b.textContent = preset.display_name;
+        b.title = `${preset.base_url}\n默认模型：${preset.model}`;
+        b.addEventListener("click", () => {
+          this.editing = { ...preset, hasKey: false };
+          this.render();
+          void this.fetchModels();
+        });
+        presetWrap.appendChild(b);
+      }
+      card.appendChild(row("快速配置", presetWrap));
+    }
+
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "ais-link";
-    addBtn.textContent = "+ 添加 OpenAI-compatible Provider";
-    addBtn.addEventListener("click", async () => {
-      const preset = await this.deps.preset();
+    addBtn.id = "ais-add-custom";
+    addBtn.textContent = "+ 添加自定义 OpenAI-compatible Provider";
+    addBtn.addEventListener("click", () => {
+      const preset = this.availablePresets[0];
       this.editing = {
-        ...preset,
+        ...(preset ?? DEFAULT_EDIT_STATE),
         id: `custom-${Date.now().toString(36)}`,
         display_name: "自定义 Provider",
         base_url: "https://",
         model: "",
         is_default: false,
+        sends_session_header: false,
         hasKey: false,
       };
       this.render();
@@ -157,12 +289,36 @@ export class ProviderSettings {
     urlInput.addEventListener("input", () => (e.base_url = urlInput.value));
     card.appendChild(row("Base URL", urlInput));
 
+    // --- model --------------------------------------------------------------
+    // The input stays free-text (a model id can always be typed even when the
+    // catalogue call fails), but the datalist is filled from the provider's
+    // live list so the user picks from what actually exists today.
+    const modelWrap = document.createElement("div");
+    modelWrap.className = "ais-modelrow";
     const modelInput = document.createElement("input");
     modelInput.id = "ais-model";
     modelInput.value = e.model;
-    modelInput.placeholder = "deepseek-chat";
-    modelInput.addEventListener("input", () => (e.model = modelInput.value));
-    card.appendChild(row("Model", modelInput));
+    modelInput.placeholder = "deepseek-flash";
+    modelInput.setAttribute("list", "ais-model-list");
+    modelInput.addEventListener("input", () => {
+      e.model = modelInput.value;
+      this.updateModelHint();
+    });
+    this.modelList = document.createElement("datalist");
+    this.modelList.id = "ais-model-list";
+    const fetchBtn = document.createElement("button");
+    fetchBtn.type = "button";
+    fetchBtn.id = "ais-fetch-models";
+    fetchBtn.className = "ais-link";
+    fetchBtn.textContent = "拉取可用模型";
+    fetchBtn.addEventListener("click", () => void this.fetchModels());
+    modelWrap.append(modelInput, this.modelList, fetchBtn);
+    card.appendChild(row("Model", modelWrap));
+
+    this.modelHint = document.createElement("p");
+    this.modelHint.id = "ais-model-hint";
+    this.modelHint.className = "ais-note";
+    card.appendChild(this.modelHint);
 
     // --- credential ---------------------------------------------------------
     const keyWrap = document.createElement("div");
@@ -315,6 +471,9 @@ export class ProviderSettings {
     }
 
     this.overlay.appendChild(card);
+    // Show the protocol warning for an already-saved model id too, not only for
+    // one the user just picked from the list.
+    this.updateModelHint();
     if (this.pendingStatus) {
       this.setStatus(this.pendingStatus.text, this.pendingStatus.kind);
     }
@@ -336,6 +495,23 @@ export class ProviderSettings {
 
 type StatusKind = "ok" | "err" | "warn";
 
+/**
+ * Seed for the "custom provider" form. Only used for field shapes — the user
+ * overwrites every value. `sentinel` fields keep the type honest so the form
+ * does not need a second, parallel type.
+ */
+const DEFAULT_EDIT_STATE: EditState = {
+  id: "",
+  display_name: "",
+  base_url: "https://",
+  model: "",
+  credential_id: "",
+  is_default: false,
+  sends_session_header: false,
+  hasKey: false,
+};
+
+
 function fromStatus(p: ProfileStatus): EditState {
   return {
     id: p.id,
@@ -344,6 +520,7 @@ function fromStatus(p: ProfileStatus): EditState {
     model: p.model,
     credential_id: p.id,
     is_default: p.is_default,
+    sends_session_header: p.sends_session_header,
     hasKey: p.has_key,
   };
 }

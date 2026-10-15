@@ -30,6 +30,7 @@ const MODE_LABELS: Record<ContextMode, string> = {
   "selection": "选中文字",
   "current-page": "当前页",
   "nearby-pages": "相邻三页",
+  "whole-document": "整篇文章",
 };
 
 const MODE_HINTS: Record<ContextMode, string> = {
@@ -37,6 +38,8 @@ const MODE_HINTS: Record<ContextMode, string> = {
   "selection": "发送你在 PDF 中选中的文字及其页码。",
   "current-page": "发送当前页的可提取文字。",
   "nearby-pages": "发送当前页、上一页与下一页的可提取文字。",
+  "whole-document":
+    "发送全篇的可提取文字（含页码标记），适合「概述全文」这类问题。论文很长时会超出长度上限，届时只发送前若干页，并会在回答和提示里标明实际范围。",
 };
 
 export class ChatPanel {
