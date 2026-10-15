@@ -233,7 +233,10 @@ export class PdfjsAdapter {
   }
 
   markClean(): void {
-    this.markDirty(false);
+    // Always notify, even when the flag was already false: the shell also
+    // uses this to refresh the document name / title after an open.
+    this.dirtyFlag = false;
+    this.onDirtyChange?.(false);
   }
 
   /* ---------------------------------------------------------------- Open -- */

@@ -258,8 +258,9 @@ function wireViewerEvents() {
   bus.on("pagechanging", (e: { pageNumber: number; pagesCount: number }) => {
     pageIndicator.textContent = `${e.pageNumber} / ${e.pagesCount}`;
   });
-  bus.on("pagesinit", (e: { pagesCount: number }) => {
-    pageIndicator.textContent = `1 / ${e.pagesCount}`;
+  bus.on("pagesinit", () => {
+    // `pagesCount` is not carried by the 6.x event payload; read the document.
+    pageIndicator.textContent = `1 / ${adapter.numPages}`;
     zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
   });
 }

@@ -69,6 +69,14 @@ async function main() {
   record("C0", "NSIS 安装包存在", "PASS", `${INSTALLER}\n            ${(size / 1048576).toFixed(2)} MB  SHA-256=${hash}`);
 
   // ---------------------------------------------------------------- install
+  // A PaperAI left over from a previous run would swallow the single-instance
+  // hand-off and make C3/C4 look flaky. Start from a clean slate.
+  const stale = ps(`(Get-Process -Name PaperAI -ErrorAction SilentlyContinue | Measure-Object).Count`).out;
+  if (stale && stale !== "0") {
+    ps(`Get-Process -Name PaperAI -ErrorAction SilentlyContinue | Stop-Process -Force | Out-String`);
+    await sleep(2500);
+  }
+
   const beforeProgId = ps(`(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\UserChoice' -ErrorAction SilentlyContinue).ProgId`).out;
 
   const inst = spawnSync(INSTALLER, ["/S"], { encoding: "utf8", timeout: 300000 });

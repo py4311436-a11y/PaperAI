@@ -1,12 +1,12 @@
 # Stage B — real WebView2 verification results
 
-Generated: 2026-10-15T05:26:26.556Z
+Generated: 2026-10-15T05:48:30.732Z
 Binary under test: `D:\PaperAI-Build\target\release\PaperAI.exe`
 
 | ID | Check | Result | Notes |
 |---|---|---|---|
 | A0 | release 可执行文件存在 | **PASS** | D:\PaperAI-Build\target\release\PaperAI.exe |
-| B0.1 | 连接到真实 WebView2 页面 | **PASS** | http://tauri.localhost/ (port 9730) |
+| B0.1 | 连接到真实 WebView2 页面 | **PASS** | http://tauri.localhost/ (port 9760) |
 | B0.2 | 前端在真实 WebView2 中启动 | **PASS** | PDF.js=6.4.299 isTauri=true             UA=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0 |
 | B1.1 | 通过 Rust 后端打开单栏 PDF | **PASS** | 页数=23 |
 | B0.3 | AnnotationEditorUIManager 已就绪（真实 WebView2） | **PASS** | hasUIManager=true |

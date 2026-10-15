@@ -8,7 +8,7 @@ registry dumps: `evidence/stage-c/assoc-dump.txt`, `assoc-detail.txt`.
 
 | ID | Check | Result | Notes |
 |---|---|---|---|
-| C0 | NSIS 安装包存在 | PASS | 3.67 MB, SHA-256 `aa8774ed…` |
+| C0 | NSIS 安装包存在 | PASS | 3.67 MB, SHA-256 `c29f9dae…` |
 | C1.1 | 静默安装 (`/S`) | PASS | exit 0 |
 | C1.2 | 安装目录已生成 | PASS | `%LOCALAPPDATA%\PaperAI\` |
 | C1.3 | 主程序 `PaperAI.exe` | PASS | `…\PaperAI\PaperAI.exe` |

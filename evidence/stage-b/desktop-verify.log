@@ -1,7 +1,7 @@
 [PASS    ] A0  release 可执行文件存在
             D:\PaperAI-Build\target\release\PaperAI.exe
 [PASS    ] B0.1  连接到真实 WebView2 页面
-            http://tauri.localhost/ (port 9730)
+            http://tauri.localhost/ (port 9760)
 [PASS    ] B0.2  前端在真实 WebView2 中启动
             PDF.js=6.4.299 isTauri=true
                         UA=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0

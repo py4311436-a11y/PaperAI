@@ -60,10 +60,10 @@ SHA-256:
 
 | File | Bytes | SHA-256 |
 |---|---|---|
-| `output/annotated-desktop.pdf` | 497,510 | `d241076ddc1cbfc98b1a15b77e17b009895411724001f6f80d43a394366c664b` |
+| `output/annotated-desktop.pdf` | 497,510 | `2a99ff81e57ef4298d6402f4bebc95d63815709d10f95510563a4398422dbbde` |
 | `test-fixtures/dual/IEEE 双栏 论文 副本.pdf` (source) | 490,608 | `e90453ad008664496bf957a600a37aded935bff5a31d0c7310570e5af2b22559` |
-| `dist/installer/PaperAI_0.2.0_x64-setup.exe` | 3,852,336 | `aa8774ed910fe27bb6256071dd78e57f85f452a1696d3de04d19e3d67782a5ec` |
-| `D:\PaperAI-Build\target\release\PaperAI.exe` | 6,394,368 | `f567db9e1a4a0e4d4dc8c5d408a59ad0af8a909251dea81f7940339f72962dcb` |
+| `dist/installer/PaperAI_0.2.0_x64-setup.exe` | 3,852,257 | `c29f9dae30c724dcb6ac4e229f63d68d1a5163b96a4865404cd352391336be43` |
+| `D:\PaperAI-Build\target\release\PaperAI.exe` | 6,394,368 | `0f880f771c74237df0602f1749aecb2b79991b0c88055491ff38534382fd505f` |
 
 Third-party annotation preservation was **not** tested in this round: no
 legally redistributable pre-annotated PDF was available locally, and the

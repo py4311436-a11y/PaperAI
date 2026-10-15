@@ -1,6 +1,6 @@
 [PASS    ] C0  NSIS 安装包存在
             D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe
-                        14.95 MB  SHA-256=b8517dd0f69da76af8a7b98263e6641147dafddd6d5187d4c90bc63894999138
+                        3.67 MB  SHA-256=c29f9dae30c724dcb6ac4e229f63d68d1a5163b96a4865404cd352391336be43
 [PASS    ] C1.1  静默安装执行
             退出码=0
 [PASS    ] C1.2  安装目录已生成
@@ -12,7 +12,7 @@
 [PASS    ] C1.5  已安装应用/卸载项登记
             PaperAI || "C:\Users\py252\AppData\Local\PaperAI\uninstall.exe"
 [PASS    ] C2.1  .pdf 关联注册（作为候选项）
-            自动注册(bundle.fileAssociations)=HKCU:\SOFTWARE\Classes\Applications\PaperAI.exe; 脚本注册脚本输出=Registered: C:\Users\py252\AppData\Local\PaperAI\PaperAI.exe
+            自动注册(bundle.fileAssociations)=无; 脚本注册脚本输出=Registered: C:\Users\py252\AppData\Local\PaperAI\PaperAI.exe
             PaperAI is now offered in 'Open with' for .pdf. The default reader was not changed.
                         注册结果=HKCU:\SOFTWARE\Classes\Applications\PaperAI.exe ;; HKCU:\SOFTWARE\Classes\.pdf\OpenWithProgids contains PaperAI.exe
 [PASS    ] C2.2  未抢占系统默认 PDF 阅读器

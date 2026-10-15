@@ -95,8 +95,8 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 | | |
 |---|---|
 | Path | `D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe` |
-| Size | 3,852,336 bytes (3.67 MiB) |
-| SHA-256 | `aa8774ed910fe27bb6256071dd78e57f85f452a1696d3de04d19e3d67782a5ec` |
+| Size | 3,852,257 bytes (3.67 MiB) |
+| SHA-256 | `c29f9dae30c724dcb6ac4e229f63d68d1a5163b96a4865404cd352391336be43` |
 | Installed to | `%LOCALAPPDATA%\PaperAI\` (currentUser, no elevation) |
 | Uninstall verified | yes — exe removed, uninstall entry removed, default PDF reader untouched |
 | Signature | **unsigned**. Windows shows "unknown publisher"; nothing was bypassed |
@@ -107,7 +107,7 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 
 | File | Bytes | SHA-256 |
 |---|---|---|
-| `output/annotated-desktop.pdf` (Highlight 1 · Ink 3) | 497,510 | `d241076ddc1cbfc98b1a15b77e17b009895411724001f6f80d43a394366c664b` |
+| `output/annotated-desktop.pdf` (Highlight 1 · Ink 3) | 497,510 | `2a99ff81e57ef4298d6402f4bebc95d63815709d10f95510563a4398422dbbde` |
 | `test-fixtures/dual/IEEE 双栏 论文 副本.pdf` (source) | 490,608 | `e90453ad008664496bf957a600a37aded935bff5a31d0c7310570e5af2b22559` |
 
 Structure verified without PDF.js: `/Type /Annot`, `/Subtype /Highlight`,
