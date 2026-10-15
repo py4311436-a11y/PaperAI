@@ -48,12 +48,63 @@ pub fn classify_transport(e: &reqwest::Error) -> AppError {
     AppError::new(codes::AI_NETWORK, format!("网络错误：{e}"))
 }
 
+/// Pull the provider's own machine-readable error token out of a body.
+///
+/// Most OpenAI-compatible gateways return something like
+/// `{"error":{"message":"...","code":"inference_failed","type":"..."}}`, and the
+/// code is the part that actually explains the failure. A raw 240-character
+/// excerpt of JSON, on its own, makes the user read through JSON to find it.
+pub fn provider_error_code(body: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let err = v.get("error").unwrap_or(&v);
+    for key in ["code", "type"] {
+        if let Some(s) = err.get(key).and_then(|x| x.as_str()) {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The provider's human-readable message, when it sent one.
+pub fn provider_error_message(body: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let err = v.get("error").unwrap_or(&v);
+    for key in ["message", "detail", "description"] {
+        if let Some(s) = err.get(key).and_then(|x| x.as_str()) {
+            let t: String = s.chars().filter(|c| !c.is_control() || *c == ' ').collect();
+            let t = t.trim();
+            if !t.is_empty() {
+                return Some(t.chars().take(200).collect());
+            }
+        }
+    }
+    None
+}
+
 /// Classify a non-2xx status. `body` is only used for a *sanitised* excerpt.
 pub fn classify_status(status: u16, body: &str) -> AppError {
     let hint = safe_excerpt(body);
+    let why = provider_error_code(body)
+        .map(|c| format!("服务给出的原因：{c}。"))
+        .unwrap_or_default();
     match status {
         401 => AppError::new(codes::AI_UNAUTHORIZED, "API Key 无效或已过期（401）"),
-        403 => AppError::new(codes::AI_UNAUTHORIZED, "API Key 无权限访问该服务（403）"),
+        // NOT "your key is wrong". OpenCode's gateway answers 403 with
+        // `inference_failed` when an *upstream provider* refuses the request,
+        // which is a completely different problem with a completely different
+        // fix. Telling the user to re-check their key sends them down the wrong
+        // path for an hour. Name both possibilities and let the provider's own
+        // code break the tie.
+        403 => AppError::new(
+            codes::AI_UNAUTHORIZED,
+            format!(
+                "服务拒绝了该请求（403）。{why}这不一定是密钥问题：网关也用 403 表示\
+                 上游推理服务拒绝了请求。若上面有服务自身的错误码，以它为准。{hint}"
+            ),
+        ),
         404 => AppError::new(
             codes::AI_NOT_FOUND,
             format!("接口或模型不存在（404）。请检查 Base URL 与模型名。{hint}"),
@@ -72,9 +123,13 @@ pub fn classify_status(status: u16, body: &str) -> AppError {
 
 /// A short, sanitised excerpt of a provider error body.
 ///
-/// Providers sometimes echo request details; we cap the length, strip control
-/// characters, and the caller never logs it at info level.
+/// A JSON error body is preferred in its own words: the provider's `message`
+/// beats 240 characters of raw JSON with the useful part buried in the middle.
+/// Raw text is still used when the body is not JSON.
 fn safe_excerpt(body: &str) -> String {
+    if let Some(m) = provider_error_message(body) {
+        return format!(" 服务返回：{m}");
+    }
     let cleaned: String = body
         .chars()
         .filter(|c| !c.is_control() || *c == ' ')
@@ -135,6 +190,61 @@ mod tests {
         let t = resolve_target("https://api.deepseek.com/v1/").unwrap();
         assert_eq!(t.url, "https://api.deepseek.com/v1/chat/completions");
         assert_eq!(t.base_url, "https://api.deepseek.com/v1");
+    }
+
+    /// The real body from an OpenCode gateway refusal, which is what prompted
+    /// all of this: the console showed `403 Rejected / inference_failed`.
+    const OPENCODE_403: &str = r#"{"error":{"message":"upstream provider refused the request","code":"inference_failed","type":"upstream_error"}}"#;
+
+    #[test]
+    fn extracts_the_providers_own_error_code() {
+        assert_eq!(provider_error_code(OPENCODE_403).as_deref(), Some("inference_failed"));
+        // Flat shapes, as some gateways use.
+        assert_eq!(
+            provider_error_code(r#"{"code":"model_not_found"}"#).as_deref(),
+            Some("model_not_found")
+        );
+        // Nothing to find is not an error.
+        assert_eq!(provider_error_code("not json"), None);
+        assert_eq!(provider_error_code(r#"{"error":{}}"#), None);
+    }
+
+    #[test]
+    fn excerpt_prefers_the_providers_own_words_over_raw_json() {
+        let e = safe_excerpt(OPENCODE_403);
+        assert!(e.contains("upstream provider refused"), "{e}");
+        assert!(
+            !e.contains('{'),
+            "the user should not have to read JSON to find the reason: {e}"
+        );
+    }
+
+    /// The bug this fixes: 403 was reported as "your key lacks permission",
+    /// which sends the user to re-check a key that may be perfectly fine.
+    #[test]
+    fn a_403_does_not_assert_the_key_is_the_problem() {
+        let e = classify_status(403, OPENCODE_403);
+        let m = e.message;
+        assert!(!m.contains("无权限"), "still blames the key: {m}");
+        assert!(m.contains("inference_failed"), "does not surface the real reason: {m}");
+        assert!(m.contains("上游"), "does not mention the other possibility: {m}");
+    }
+
+    #[test]
+    fn a_401_still_means_the_key() {
+        // Not weakened: a genuine auth failure must still say so.
+        assert!(classify_status(401, "").message.contains("API Key"));
+    }
+
+    #[test]
+    fn host_of_never_leaks_the_path() {
+        assert_eq!(crate::ai::config::host_of("https://opencode.ai/inference/go/v1"), "opencode.ai");
+        assert_eq!(crate::ai::config::host_of("https://api.deepseek.com"), "api.deepseek.com");
+        assert_eq!(crate::ai::config::host_of("http://127.0.0.1:8788/v1"), "127.0.0.1:8788");
+        // A tenant id or token in the path must not reach the log file.
+        let h = crate::ai::config::host_of("https://gw.example.com/v1/tenant-42?key=abc");
+        assert!(!h.contains("tenant-42") && !h.contains("abc"), "{h}");
+        assert_eq!(crate::ai::config::host_of("garbage"), "(unparsed)");
     }
 
     #[test]

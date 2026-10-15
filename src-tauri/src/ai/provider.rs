@@ -119,6 +119,42 @@ impl Provider for OpenAiCompatible {
 
 /// The streaming core, generic over the sink.
 ///
+/// Total characters sent, logged so "the gateway refused because the payload was
+/// too big" is answerable after the fact instead of guessed at.
+fn req_chars(req: &ChatCall) -> usize {
+    req.messages.iter().map(|m| m.content.chars().count()).sum()
+}
+
+/// One log line per request outcome.
+///
+/// Added because a provider rejection was undiagnosable: `paperai.log` recorded
+/// only argv, so when OpenCode answered 403/`inference_failed` there was nothing
+/// on the machine to say which model, which host, how large the payload was, or
+/// what the gateway's own reason was. Those four facts decide almost every case,
+/// and none of them is a secret.
+///
+/// Recorded: model, host, status, the provider's own error token, payload size,
+/// elapsed time. NOT recorded: the key, message content, document text, titles.
+fn audit_outcome(
+    model: &str,
+    base_url: &str,
+    status: u16,
+    body: &str,
+    chars: usize,
+    started: Instant,
+) {
+    let code = if body.is_empty() {
+        "-".to_string()
+    } else {
+        client::provider_error_code(body).unwrap_or_else(|| "none".into())
+    };
+    crate::audit(&format!(
+        "ai: model={model} host={} status={status} provider_code={code} chars={chars} elapsed_ms={}",
+        config::host_of(base_url),
+        started.elapsed().as_millis()
+    ));
+}
+
 /// Kept separate from the `Channel` so it can be driven end-to-end by the
 /// integration tests (which collect events into a Vec) without a Tauri app.
 /// The `Channel` implementation above is a two-line wrapper.
@@ -127,6 +163,7 @@ where
     S: Fn(AiStreamEvent) + Send + Sync,
 {
     sink(AiStreamEvent::Started);
+    let started = Instant::now();
 
     let target = match client::resolve_target(&req.base_url) {
         Ok(t) => t,
@@ -170,8 +207,11 @@ where
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return fail(sink, classify_status(status.as_u16(), &body));
+        let err = classify_status(status.as_u16(), &body);
+        audit_outcome(&req.model, &target.base_url, status.as_u16(), &body, req_chars(&req), started);
+        return fail(sink, err);
     }
+    audit_outcome(&req.model, &target.base_url, status.as_u16(), "", req_chars(&req), started);
 
     let mut parser = SseParser::new();
     let mut body = resp.bytes_stream();

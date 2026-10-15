@@ -552,3 +552,122 @@ does, and no two may share a credential slot (3), and the session header present
 / absent pair (2 e2e, asserted from the recorded request).
 
 `pdfjs-dist` still pinned at 6.4.299.
+
+---
+
+## 13. The 0.4.1 patch
+
+Two reports from the user on 0.4.0: the model dropdown could not be used, and
+OpenCode's console showed repeated `403 Rejected / inference_failed`.
+
+### 13.1 The model dropdown — wrong widget, and a test that could not fail
+
+The picker shipped as a `<datalist>`. Chromium treats a datalist as a
+*type-ahead suggestion popup* filtered against the input's current value, so 46
+fetched models rendered as **one** entry and picking from it did not take. Both
+symptoms in one cause.
+
+Fixed by using a real `<select>` beside the free-text input. The input stays
+because a model id must remain typeable when the catalogue call fails.
+
+**The test I wrote first could not fail.** It counted `datalist.options` and read
+`.value` — and a `<select>` and a `<datalist>` both expose those, so the suite
+went 9/9 green on the *broken* widget when I reverted the fix to check. The
+assertion that actually distinguishes them is rendered geometry: the element
+must be a `SELECT` **and** have a non-zero box, because Chromium renders a
+datalist with no box of its own. With that added, the broken widget fails and the
+fixed one passes — verified in both directions:
+
+| Implementation | Result |
+|---|---|
+| `<datalist>` (the bug) | **9/10** — P2b fails on `tagName` and rendered size |
+| `<select>` (the fix) | **10/10** |
+
+This is the third bug in this project that existed only at the rendering layer,
+and the second time a test of mine passed against a broken build. Both times the
+cause was the same: asserting on a DOM property that both implementations
+happen to share, instead of on what the user actually sees.
+
+New suite `tests/provider-model-picker.mjs` (`npm run test:ui-picker`) drives the
+dialog in headless Chromium over CDP with stubbed dependencies — no Tauri, no
+network, no credential store. It covers: all models listed, **selection reaches
+the input**, **selection reaches what `save()` receives**, free models marked,
+incompatible models warned about before sending, typed values winning over a
+stale highlight, and the list surviving a re-render.
+
+Two robustness bugs in the harness itself, both found the hard way:
+
+* Fixed CDP/HTTP ports meant a leftover Edge from a previous run could be
+  attached to, and the suite then drove a stale page from a deleted temp
+  directory — presenting as an application bug. Ports are now assigned by the
+  kernel and the page target is matched on URL.
+* The dialog opens with nothing selected, so the first version of the suite read
+  fields that did not exist yet and reported `null` for three assertions. It now
+  clicks a preset first, the way a user does.
+
+### 13.2 The 403s — what was checked, and what is actually ours
+
+The console showed eight `403 Rejected / inference_failed` in ~90 minutes, with
+one `200` interleaved (22:55:57, 7.28 s). **Interleaved failure is the decisive
+clue**: a wrong key, a retired model or a missing entitlement fails every time.
+
+What was verified on this machine before concluding anything:
+
+| Checked | Result |
+|---|---|
+| Installed version | 0.4.0 |
+| `base_url` | `https://opencode.ai/inference/go/v1` — matches the official endpoint table |
+| `model` | `deepseek-v4.1-flash` — present in Go's live catalogue |
+| `sends_session_header` | **true** — so the documented `x-opencode-session` requirement *is* met |
+| Request body | only `model` / `messages` / `stream` / optional `temperature` |
+| Failure latency | 30–94 ms — no inference ran |
+
+**Conclusion: not caused by what PaperAI sends.** The one signal that points
+elsewhere is the gateway's own token: `inference_failed` is an *upstream
+inference* failure, not an auth failure — a bad key on OpenCode returns
+`unauthorized`. Fast, intermittent rejections with an occasional success are the
+signature of a gateway whose upstream pool is refusing some requests. That is
+OpenCode's side, and this report does not claim otherwise as proven.
+
+Two defects on our side were real, though, and both made the problem *harder to
+diagnose* than it needed to be:
+
+1. **The 403 message asserted a cause it could not know.** It said
+   「API Key 无权限访问该服务（403）」, which sends the user to re-check a key that
+   may be perfectly fine — the wrong path for an hour. It now names both
+   possibilities and leads with the gateway's own error token
+   (`inference_failed`), which is the part that actually explains it.
+2. **Nothing about AI requests was logged.** `paperai.log` recorded only argv, so
+   the four facts that decide almost every case — model, host, status, payload
+   size — were not on the machine. Every request now writes one line:
+
+   ```
+   ai: model=deepseek-v4.1-flash host=opencode.ai status=403 \
+       provider_code=inference_failed chars=48210 elapsed_ms=92
+   ```
+
+   The function that writes it takes no credential parameter at all, so it
+   structurally cannot log a key; it records no message content, document text or
+   title. `host_of()` returns only the authority, never a path, because a path
+   can carry a tenant id — covered by a test.
+
+Also improved: a JSON error body is now summarised using the provider's own
+`message` instead of 240 characters of raw JSON with the useful part buried in it.
+
+### 13.3 Verification
+
+| Suite | 0.4.0 | 0.4.1 |
+|---|---|---|
+| `cargo test --lib` | 49 | **54** |
+| `cargo test --test save_crash_recovery` | 8 | 8 |
+| `run-ai-rust-tests.mjs` | 22 | 22 |
+| `run-ai-unit-tests.mjs` | 53 | 53 |
+| `tests/overlay-visibility.mjs` | 15 | 15 |
+| `tests/provider-model-picker.mjs` | — | **10** |
+| `windows-integration.mjs` | 17 | 17 |
+| `windows-upgrade.mjs` | 13 | 13 |
+| **total** | **177** | **192** |
+
+Five new Rust assertions pin the diagnosis behaviour: the provider's error token
+is extracted, the excerpt prefers the provider's words, a 403 no longer blames
+the key, a 401 still does, and `host_of` cannot leak a path.

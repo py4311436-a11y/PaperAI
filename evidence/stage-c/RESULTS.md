@@ -1,14 +1,14 @@
 # Stage C — Windows integration results
 
-Generated: 2026-10-15T14:34:43.968Z
-Installer: `D:/AIreader/PaperAI-PoC/release/PaperAI_0.4.0_x64-setup.exe`
+Generated: 2026-10-15T15:53:25.590Z
+Installer: `D:/AIreader/PaperAI-PoC/release/PaperAI_0.4.1_x64-setup.exe`
 
 | ID | Check | Result | Notes |
 |---|---|---|---|
-| C0 | NSIS 安装包存在 | **PASS** | D:/AIreader/PaperAI-PoC/release/PaperAI_0.4.0_x64-setup.exe             4.77 MB  SHA-256=b4cbd6a4004eb1c9649813d2408f752bc5750a4bf6bf02dbf6af95cef7cfab0c |
+| C0 | NSIS 安装包存在 | **PASS** | D:/AIreader/PaperAI-PoC/release/PaperAI_0.4.1_x64-setup.exe             4.77 MB  SHA-256=3c62ebdda5125136d627e974a4de70b89508aac60ed30f12716c773cbfe6b7c5 |
 | C1.1 | 静默安装执行 | **PASS** | 退出码=0 |
 | C1.2 | 安装目录已生成 | **PASS** | D:\Program Files\PaperAI |
-| C1.3 | 主程序存在且版本与安装包一致 | **PASS** | D:\Program Files\PaperAI\PaperAI.exe  ProductVersion=0.4.0  期望=0.4.0 |
+| C1.3 | 主程序存在且版本与安装包一致 | **PASS** | D:\Program Files\PaperAI\PaperAI.exe  ProductVersion=0.4.1  期望=0.4.1 |
 | C1.4 | 开始菜单快捷方式 | **PASS** | C:\Users\py252\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\PaperAI.lnk |
 | C1.5 | 已安装应用/卸载项登记 | **PASS** | PaperAI || "D:\Program Files\PaperAI\uninstall.exe" |
 | C2.1 | .pdf 关联由安装器原生注册（候选项） | **PASS** | 注册结果=HKCU:\SOFTWARE\Classes\Applications\PaperAI.exe ;; HKCU:\SOFTWARE\Classes\.pdf\OpenWithProgids contains PaperAI.exe; .pdf 默认 ProgId=""（安装器不得抢占默认） |

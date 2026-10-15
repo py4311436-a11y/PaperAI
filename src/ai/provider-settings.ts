@@ -46,7 +46,7 @@ export class ProviderSettings {
   private availablePresets: AiProfile[] = [];
   /** Live catalogue from the last successful fetch, for the model hint. */
   private lastModels: ModelOption[] = [];
-  private modelList: HTMLDataListElement | null = null;
+  private modelSelect: HTMLSelectElement | null = null;
   private modelHint: HTMLElement | null = null;
 
   constructor(private deps: SettingsDeps) {
@@ -103,23 +103,11 @@ export class ProviderSettings {
       // stored key from being sent to a host it was never configured for.
       const models = await this.deps.listModels(e.base_url, e.id, e.sends_session_header);
       this.lastModels = models;
-      if (this.modelList) {
-        this.modelList.textContent = "";
-        for (const m of models) {
-          const o = document.createElement("option");
-          o.value = m.id;
-          if (m.compatibility === "incompatible") {
-            o.label = `${m.id} — 该模型使用其它接口协议，PaperAI 无法调用`;
-          } else if (m.free_hint) {
-            o.label = `${m.id} — 名称含 -free，可能免费`;
-          }
-          this.modelList.appendChild(o);
-        }
-      }
+      this.fillModelSelect(models);
       const incompatible = models.filter((m) => m.compatibility === "incompatible").length;
       const free = models.filter((m) => m.free_hint).length;
       this.setStatus(
-        `已拉取 ${models.length} 个模型，点 Model 输入框可下拉选择。` +
+        `已拉取 ${models.length} 个模型，在 Model 右侧下拉框中选择。` +
           (free ? `其中 ${free} 个名称含 -free（可能免费）。` : "") +
           (incompatible ? `有 ${incompatible} 个使用其它协议，已标注。` : ""),
         "ok"
@@ -127,10 +115,63 @@ export class ProviderSettings {
       this.updateModelHint();
     } catch (err) {
       this.lastModels = [];
-      if (this.modelList) this.modelList.textContent = "";
+      this.fillModelSelect([]);
       this.setStatus(describe(err), "err");
       this.updateModelHint();
     }
+  }
+
+  /**
+   * Build the model dropdown from a catalogue.
+   *
+   * Called both after a fetch and from `render()`, because `render()` rebuilds
+   * the whole card: without this the list would vanish every time the dialog
+   * re-rendered (picking a preset, saving, toggling a field) while the status
+   * line still claimed the models had been loaded.
+   */
+  private fillModelSelect(models: ModelOption[]): void {
+    const sel = this.modelSelect;
+    if (!sel) return;
+    sel.textContent = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = models.length
+      ? `— 从 ${models.length} 个模型中选择 —`
+      : "— 尚未拉取，点「拉取可用模型」—";
+    sel.appendChild(placeholder);
+
+    const manual = document.createElement("option");
+    manual.value = MANUAL_ID;
+    manual.textContent = "✎ 手动输入（不使用此列表）";
+    sel.appendChild(manual);
+
+    for (const m of models) {
+      const o = document.createElement("option");
+      o.value = m.id;
+      const marks: string[] = [];
+      if (m.free_hint) marks.push("可能免费（名称含 -free）");
+      if (m.compatibility === "incompatible") marks.push("⚠ 其它协议，不可用");
+      o.textContent = marks.length ? `${m.id}　—　${marks.join("；")}` : m.id;
+      sel.appendChild(o);
+    }
+
+    // Pre-select whatever the profile already uses, if it is on the list.
+    const current = this.editing?.model.trim() ?? "";
+    sel.value = models.some((m) => m.id === current) ? current : MANUAL_ID;
+  }
+
+  /**
+   * Keep the dropdown honest while the user types.
+   *
+   * Typed text wins, so the selection falls back to 「手动输入」 rather than
+   * silently showing a stale highlight next to a different value.
+   */
+  private syncSelectFromInput(): void {
+    const sel = this.modelSelect;
+    const want = this.editing?.model.trim() ?? "";
+    if (!sel || sel.value === want) return;
+    sel.value = [...sel.options].some((o) => o.value === want && want !== "") ? want : MANUAL_ID;
   }
 
   /**
@@ -184,7 +225,7 @@ export class ProviderSettings {
     // `textContent = ""` detaches the previous datalist and hint; they are
     // rebuilt below, so drop the stale references rather than writing into
     // nodes that are no longer in the document.
-    this.modelList = null;
+    this.modelSelect = null;
     this.modelHint = null;
     const card = document.createElement("div");
     card.className = "ais-card";
@@ -290,29 +331,52 @@ export class ProviderSettings {
     card.appendChild(row("Base URL", urlInput));
 
     // --- model --------------------------------------------------------------
-    // The input stays free-text (a model id can always be typed even when the
-    // catalogue call fails), but the datalist is filled from the provider's
-    // live list so the user picks from what actually exists today.
+    // Two controls on purpose:
+    //   * a real `<select>` fed by the provider's live catalogue. This started
+    //     out as a `<datalist>`, which was the wrong widget twice over — Chromium
+    //     filters a datalist against the input's current value (so 46 fetched
+    //     models showed as one), and its "type-ahead suggestion" semantics make
+    //     picking an item unreliable. A `<select>` always shows the whole list
+    //     and always reports a selection.
+    //   * a free-text input beside it, because a model id must stay typeable
+    //     when the catalogue call fails or the provider ships something new.
     const modelWrap = document.createElement("div");
     modelWrap.className = "ais-modelrow";
+
     const modelInput = document.createElement("input");
     modelInput.id = "ais-model";
     modelInput.value = e.model;
     modelInput.placeholder = "deepseek-flash";
-    modelInput.setAttribute("list", "ais-model-list");
     modelInput.addEventListener("input", () => {
       e.model = modelInput.value;
+      // Typing means the select no longer reflects the value; show that rather
+      // than leaving a stale option highlighted.
+      this.syncSelectFromInput();
       this.updateModelHint();
     });
-    this.modelList = document.createElement("datalist");
-    this.modelList.id = "ais-model-list";
+
+    const modelSelect = document.createElement("select");
+    modelSelect.id = "ais-model-select";
+    modelSelect.className = "ais-modelselect";
+    modelSelect.addEventListener("change", () => {
+      const picked = modelSelect.value;
+      if (!picked || picked === MANUAL_ID) return;
+      modelInput.value = picked;
+      e.model = picked;
+      this.updateModelHint();
+    });
+    this.modelSelect = modelSelect;
+
     const fetchBtn = document.createElement("button");
     fetchBtn.type = "button";
     fetchBtn.id = "ais-fetch-models";
     fetchBtn.className = "ais-link";
     fetchBtn.textContent = "拉取可用模型";
     fetchBtn.addEventListener("click", () => void this.fetchModels());
-    modelWrap.append(modelInput, this.modelList, fetchBtn);
+
+    modelWrap.append(modelInput, this.modelSelect, fetchBtn);
+    // `render()` wipes the card, so the list is rebuilt from the last fetch.
+    this.fillModelSelect(this.lastModels);
     card.appendChild(row("Model", modelWrap));
 
     this.modelHint = document.createElement("p");
@@ -494,6 +558,9 @@ export class ProviderSettings {
 }
 
 type StatusKind = "ok" | "err" | "warn";
+
+/** Sentinel option value meaning "keep typing in the input". */
+const MANUAL_ID = "__manual__";
 
 /**
  * Seed for the "custom provider" form. Only used for field shapes — the user

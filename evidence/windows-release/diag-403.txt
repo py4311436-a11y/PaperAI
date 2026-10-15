@@ -1,0 +1,48 @@
+﻿已安装版本: 0.4.0
+
+=== ai-profiles.json ===
+{
+  "profiles": [
+    {
+      "id": "deepseek",
+      "display_name": "DeepSeek锛堝崌绾у墠閰嶇疆锛?,
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-chat",
+      "credential_id": "deepseek",
+      "is_default": true,
+      "sends_session_header": false
+    },
+    {
+      "id": "opencode-go",
+      "display_name": "OpenCode Go锛堣闃咃級",
+      "base_url": "https://opencode.ai/inference/go/v1",
+      "model": "deepseek-v4.1-flash",
+      "credential_id": "opencode-go",
+      "is_default": false,
+      "sends_session_header": true
+    },
+    {
+      "id": "opencode-zen",
+      "display_name": "OpenCode Zen锛堝惈鍏嶈垂妯″瀷锛?,
+      "base_url": "https://opencode.ai/zen/v1",
+      "model": "deepseek-v4.1-flash-free",
+      "credential_id": "opencode-zen",
+      "is_default": false,
+      "sends_session_header": true
+    }
+  ]
+}
+
+=== paperai.log 最后 12 行 ===
+[1792074843] single-instance: 1 file(s) forwarded
+[1792074852] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\single\\PDF-A-single.pdf"]
+[1792074852] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\single\\PDF-A-single.pdf"]
+[1792074852] single-instance: 1 file(s) forwarded
+[1792074854] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\dual\\IEEE 鍙屾爮 璁烘枃 鍓湰.pdf"]
+[1792074854] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\dual\\IEEE 鍙屾爮 璁烘枃 鍓湰.pdf"]
+[1792074854] single-instance: 1 file(s) forwarded
+[1792074855] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\single\\鎶ュ憡 涓枃 绌烘牸 copy.pdf"]
+[1792074855] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\single\\鎶ュ憡 涓枃 绌烘牸 copy.pdf"]
+[1792074855] single-instance: 1 file(s) forwarded
+[1792074944] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe", "D:\\AIreader\\PaperAI-PoC\\test-fixtures\\dual\\IEEE 鍙屾爮 璁烘枃 鍓湰.pdf"]
+[1792075924] argv = ["D:\\Program Files\\PaperAI\\PaperAI.exe"]

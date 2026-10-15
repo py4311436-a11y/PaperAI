@@ -1,0 +1,25 @@
+Provider model picker — real Chromium
+Generated: 2026-10-15T15:49:39.727Z
+
+[PASS] P1 选择预设后基本字段已填充
+    base_url=https://opencode.ai/zen/v1
+[PASS] P2 下拉框列出全部 46 个模型
+    options=48（46 个模型 + 占位 + 手动输入），预期 48
+[PASS] P2b 模型选择器是真正可见的 <select>，而非 datalist 建议框
+    tagName=SELECT  渲染尺寸=306x19
+[PASS] P3 占位项说明列表已加载，且提供「手动输入」出口
+    — 从 46 个模型中选择 — / ✎ 手动输入（不使用此列表）
+[PASS] P4 选择下拉项后输入框同步更新（这是被报的那个 bug）
+    select=model-07 input=model-07，预期都是 model-07
+[PASS] P5 选中的模型真正进入保存的数据
+    save() 收到 model=model-07
+[PASS] P6 免费模型在列表中有标记
+    deepseek-v4.1-flash-free　—　可能免费（名称含 -free）
+[PASS] P7 选择其它协议的模型时给出警告
+    hint="⚠ 该模型（qwen3.8-max）由服务商在另一个接口协议上提供，PaperAI 只支持 OpenAI 兼容的 /chat/completions，调用会失败。请另选一个。"
+[PASS] P8 手动输入后下拉框回到「手动输入」而不是留下过期高亮
+    select=__manual__，预期 __manual__
+[PASS] P9 重新渲染后模型列表仍在（不会变回空下拉）
+    options=48
+
+10/10 PASS

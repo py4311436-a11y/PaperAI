@@ -1,6 +1,6 @@
-# AI test matrix — PaperAI 0.4.0
+# AI test matrix — PaperAI 0.4.1
 
-Generated: 2026-10-15 · Branch `ai-integration` · Version `0.4.0`
+Generated: 2026-10-15 · Branch `ai-integration` · Version `0.4.1`
 
 Every status below is the outcome of a run recorded in `evidence/`. Where a
 check could not be run, it says **BLOCKED** and names the blocker — never PASS.
@@ -11,7 +11,7 @@ check could not be run, it says **BLOCKED** and names the blocker — never PASS
 source scripts/env.sh
 
 # Rust: streaming, provider, secrets, recovery, SSE
-cd src-tauri && cargo test --lib              # 49 assertions
+cd src-tauri && cargo test --lib              # 54 assertions
 cargo test --test save_crash_recovery         # 8 assertions
 
 # Rust against a real local Mock SSE server (real socket, real SSE bytes)
@@ -24,8 +24,11 @@ node scripts/run-ai-unit-tests.mjs            # 53 assertions
 # Needs a built stylesheet: run `node scripts/build.mjs --release` first.
 node tests/overlay-visibility.mjs             # 15 assertions
 
+# Model picker in the settings dialog — real Chromium, real click/selection
+node tests/provider-model-picker.mjs# 10 assertions
+
 # Windows integration (installed app, native window title as the observable)
-node tests/windows-integration.mjs --installer release/PaperAI_0.4.0_x64-setup.exe
+node tests/windows-integration.mjs --installer release/PaperAI_0.4.1_x64-setup.exe
 
 # Upgrade path: oldest -> newest in release/ (currently 0.2.0 -> 0.3.1)
 node tests/windows-upgrade.mjs
@@ -35,7 +38,7 @@ node scripts/build.mjs --release && node scripts/verify-release-bundle.mjs dist
 node scripts/build.mjs --automation && node scripts/verify-release-bundle.mjs dist --expect-present
 ```
 
-**Totals: 171 automated assertions green. 4 BLOCKED, 4 PARTIAL.**
+**Totals: 192 automated assertions green. 4 BLOCKED, 4 PARTIAL.**
 
 ---
 
@@ -102,7 +105,7 @@ password field is cleared after save) — GUI-only, see AI-21.
 
 ---
 
-## Phase-2 regression (re-run on 0.4.0, not inherited)
+## Phase-2 regression (re-run on 0.4.1, not inherited)
 
 | Suite | Result | Evidence |
 |---|---|---|
@@ -114,7 +117,7 @@ password field is cleared after save) — GUI-only, see AI-21.
 | `tests/desktop-verify.mjs` (19 cases) | **BLOCKED** | Same |
 | `tests/readback-annotations.mjs` | **PASS** | Pure Node, no browser |
 
-> The Phase-2 numbers (19/19, 12/12) are **not** reused as evidence for 0.4.0.
+> The Phase-2 numbers (19/19, 12/12) are **not** reused as evidence for 0.4.1.
 > The two suites that need CDP are re-run only in the automation build, and that
 > is currently blocked by K-13 — recorded as BLOCKED, not as PASS.
 

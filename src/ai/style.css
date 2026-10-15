@@ -582,6 +582,15 @@
   min-width: 0;
 }
 
+.ais-modelselect {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 320px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 4px;
+}
+
 .ais-modelrow .ais-link {
   flex: 0 0 auto;
   white-space: nowrap;

@@ -122,6 +122,19 @@ pub fn display_url(url: &str) -> String {
     url.to_string()
 }
 
+/// The host (with port, if any) of a base URL — for logs and UI hints.
+///
+/// Deliberately returns only the authority: a path could carry a tenant id or a
+/// token in a query string, and this value is written to the log file.
+pub fn host_of(base_url: &str) -> String {
+    let rest = match base_url.split_once("://") {
+        Some((_scheme, r)) => r,
+        None => return "(unparsed)".into(),
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
 /// Join the model-catalogue path onto a normalised base URL.
 ///
 /// Most OpenAI-compatible gateways answer `GET {base}/models` with
