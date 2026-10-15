@@ -1,5 +1,9 @@
 //! PaperAI desktop backend.
 
+// Public so the integration tests in `tests/` can drive the provider against
+// the local Mock SSE server without going through the Tauri IPC layer.
+pub mod ai;
+
 mod commands;
 mod error;
 mod paths;
@@ -100,6 +104,10 @@ pub fn run() {
 
     let startup_for_setup = startup.clone();
 
+    // Build the AI state before the builder so a missing HTTP client fails
+    // loudly at startup rather than on the user's first question.
+    let ai_state = ai::AiState::new().expect("failed to initialise AI state");
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
@@ -117,6 +125,7 @@ pub fn run() {
             focus_main_window(app);
         }))
         .manage(PendingFiles(Mutex::new(startup.clone())))
+        .manage(ai_state)
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::open_pdf,
@@ -125,6 +134,19 @@ pub fn run() {
             commands::sha256_of,
             commands::save_document,
             commands::take_pending_files,
+            // save-recovery commands are registered in S5 (K-07)
+            ai::ai_list_profiles,
+            ai::ai_deepseek_preset,
+            ai::ai_save_profile,
+            ai::ai_delete_profile,
+            ai::ai_set_key,
+            ai::ai_delete_key,
+            ai::ai_has_key,
+            ai::ai_test_connection,
+            ai::ai_start_chat,
+            ai::ai_cancel_chat,
+            ai::ai_cancel_all,
+            ai::ai_active_requests,
         ])
         .setup(move |_app| {
             if !startup_for_setup.is_empty() {
