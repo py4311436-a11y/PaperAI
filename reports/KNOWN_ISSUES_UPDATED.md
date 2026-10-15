@@ -77,13 +77,30 @@ The automation surface used by `tests/desktop-verify.mjs` and
 * Reproduce: open DevTools in the installed app and evaluate
   `Object.keys(window).filter(k => k.startsWith("__paperai"))`.
 
-### K-04 — Highlight geometry: PDF.js reports an empty `quadPoints`
+### ✅ K-04 — "PDF.js reports an empty `quadPoints`" — **RETRACTED, it was our test bug**
 
-`page.getAnnotations()` returns `quadPoints: []` for a Highlight this app wrote,
-while the file itself contains `/QuadPoints` (byte-level check:
-`evidence/stage-d/byte-inspection.json`). The annotation is correct; the
-in-process read-back is not. Any feature that reads geometry back through PDF.js
-must not trust that field.
+Originally logged as a library defect. It is not. PDF.js exposes the geometry
+fine; our check used the wrong type and property name:
+
+* `quadPoints` **is present**, but it is an array-LIKE object
+  (`{0: 254.65, 1: 477.11, ...}`), so `Array.isArray(a.quadPoints)` is
+  `false` and `.length` behaves oddly — which reads exactly like "the data
+  is missing".
+* the Ink property is `inkLists` (**plural**), not `inkList`.
+* `color` is array-like too, in 0-255 RGB.
+
+Verified by `tests/readback-annotations.mjs` on `output/annotated-desktop.pdf`
+(`evidence/stage-d/readback-annotations.txt`):
+
+    /Subtype /Highlight  rect=[254.0,463.6,296.9,478.0]  color=[255,240,102]  hasAppearance=true
+      quadPoints: 1 quad(s), 8 values
+        quad 0: (254.7,464.4)..(296.3,477.1)
+          covered text: "with6.5%junctionless"
+    /Subtype /Ink ... inkLists: 1 stroke(s), 26 points ...
+
+Read-back works correctly. **No action needed** — but any future code that
+reads annotation geometry must use `Array.from(a.quadPoints)` and
+`a.inkLists`.
 
 ### K-05 — Windows focus stealing cannot be guaranteed
 

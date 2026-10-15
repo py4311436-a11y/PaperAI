@@ -73,6 +73,8 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 | C4 | Single instance | **PASS** | C4.1–C4.3 |
 | C5 | Uninstall cleanup | **PASS** | C5.2–C5.5 |
 | D1 | Edge GUI re-open | **PARTIAL** | `edge-printwindow.png`; annotation layer not painted by default |
+| D1b | WPS GUI re-open (independent engine) | **PASS** | highlight confirmed by the user; ink in `wps-try6.png` |
+| D1c | Read-back of annotation geometry | **PASS** | `readback-annotations.txt`; highlight covers `junctionless` |
 | D2 | Acrobat GUI re-open | **BLOCKED** | not installed |
 | D3 | Save failures never damage the original | **PASS** | `save-safety-RESULTS.md` |
 | D4 | Uncommitted ink + close protection | **PASS** | B/D4.1, D3.10 |
@@ -138,7 +140,8 @@ this product.
 
 Open, non-blocking: K-13 (CDP disabled on this machine) prevents automated
 re-verification here. K-03 (test API in the release binary) must be stripped
-before V0.1.
+before V0.1. K-04 was retracted this round — the "empty quadPoints" report was
+our own test bug (array-like object + wrong property name), not a PDF.js defect.
 
 ---
 

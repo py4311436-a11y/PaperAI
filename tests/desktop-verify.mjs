@@ -213,14 +213,15 @@ async function main() {
     record("B3.1", "saveDocument() 输出含标准批注对象", saved.rep.hasHighlight && saved.rep.hasInk ? "PASS" : "FAIL",
       `字节=${saved.size} 页数=${saved.rep.numPages} 计数=${JSON.stringify(saved.rep.countsBySubtype)}`);
 
-    const qp = saved.rep.samples.find((s) => s.subtype === "Highlight");
+    const hlSample = saved.rep.samples.find((s) => s.subtype === "Highlight");
     const ik = saved.rep.samples.find((s) => s.subtype === "Ink");
-    // NOTE: PDF.js's annotation object can report an empty `quadPoints` array
-    // even when the saved file carries a correct /QuadPoints entry, so the
-    // authoritative check is the byte-level inspection in
-    // tools/inspect_pdf.py. Record both and explain any disagreement.
-    record("B3.2", "Highlight 存在且可解析", qp ? "PASS" : "FAIL",
-      qp ? `page=${qp.page} PDF.js 报告 quadPoints=${qp.quadPoints?.length ?? "n/a"}（以字节检查为准，见 STAGE_D）` : "未找到 Highlight 样本");
+    // PDF.js returns quadPoints as an array-LIKE object ({"0":..,"1":..}), NOT a
+    // real array — Array.isArray() is false and .length misleads. This is what
+    // produced the bogus "empty quadPoints" claim in K-04, now retracted.
+    // Always Array.from() before inspecting it.
+    const qp = hlSample ? { ...hlSample, quadPoints: Array.from(hlSample.quadPoints ?? []) } : null;
+    record("B3.2", "Highlight 含 QuadPoints 几何", qp && qp.quadPoints.length >= 8 ? "PASS" : "FAIL",
+      qp ? `page=${qp.page} quadPoints长度=${qp.quadPoints.length}` : "未找到 Highlight 样本");
     record("B3.3", "Ink 含 InkList 笔迹", ik && ik.inkStrokes > 0 ? "PASS" : "FAIL",
       ik ? `page=${ik.page} 笔画数=${ik.inkStrokes}` : "未找到 Ink 样本");
 

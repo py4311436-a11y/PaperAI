@@ -1,0 +1,16 @@
+file  : output/annotated-desktop.pdf
+pages : 6
+
+--- page 1: 4 annotation(s) ---
+  /Subtype /Highlight  rect=[254.0, 463.6, 296.9, 478.0]  color=[255,240,102]  hasAppearance=true
+    quadPoints: 1 quad(s), 8 values
+      quad 0: (254.7,464.4)..(296.3,477.1)
+        covered text: "with6.5%junctionless"
+  /Subtype /Ink  rect=[173.6, 365.2, 252.6, 393.1]  color=[0,0,0]  hasAppearance=true
+    inkLists: 1 stroke(s), 26 points, x 177.1..249.1, y 368.7..389.7
+  /Subtype /Ink  rect=[176.4, 309.4, 224.6, 331.6]  color=[0,0,0]  hasAppearance=true
+    inkLists: 1 stroke(s), 26 points, x 179.9..221.1, y 312.8..328.2
+  /Subtype /Ink  rect=[171.4, 304.2, 274.4, 346.7]  color=[0,0,0]  hasAppearance=true
+    inkLists: 1 stroke(s), 26 points, x 174.9..270.9, y 307.5..343.4
+
+totals: 1 Highlight, 3 Ink
