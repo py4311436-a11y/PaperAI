@@ -1,0 +1,122 @@
+msedgewebview2 processes: 24
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --embedded-browser-webview=1 --webview-exe-name=SearchHost.exe --webview-exe-version=2608.25008.200.0 --user-data-dir="C:\Users\py252\AppData\Local\Packages\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\LocalState\EBWebView" --noerrdialogs --disable-features=msSmartScreenProtection --edge-webview-enable-mojo-ip
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=crashpad-handler --user-data-dir=C:\Users\py252\AppData\Local\Packages\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\LocalState\EBWebView /prefetch:4 /pfhostedapp:83e961e6eb857f8c66472196cdab3fb787a2c1b7 --monitor-self-annotation=ptype=crashpad-handler --database=C:\Users\py252\AppData\Local\Packages\Mic
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=gpu-process --gpu-recent-crash-count=0 --noerrdialogs --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; Cortana 1.18.9.23723; 10.0.0.0.26300.9711) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.26300 IsWebView2/True (WebView2Version 155.0.4283.45)" --user-data
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --noerrdialogs --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; Cortana 1.18.9.23723; 10.0.0.0.26300.9711) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.26300 Is
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=storage.mojom.StorageService --lang=zh-CN --service-sandbox-type=service --noerrdialogs --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; Cortana 1.18.9.23723; 10.0.0.0.26300.9711) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.26300
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --embedded-browser-webview=1 --webview-exe-name=M365Copilot.exe --webview-exe-version=19.2610.35011.0 --user-data-dir="C:\Users\py252\AppData\Local\Packages\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\LocalState\EBWebView" --noerrdialogs --embedded-browser-webview-dpi-awareness=2 --disable-features=msEnhance
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=renderer --noerrdialogs --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64; Cortana 1.18.9.23723; 10.0.0.0.26300.9711) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.102 Safari/537.36 Edge/18.26300 IsWebView2/True (WebView2Version 155.0.4283.45)" --user-data-dir="C:\Users\py252\AppData\L
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=crashpad-handler --user-data-dir=C:\Users\py252\AppData\Local\Packages\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\LocalState\EBWebView /prefetch:4 /pfhostedapp:8a6084588dd9ae5a3c1408e75e55078eb6e67cdd --monitor-self-annotation=ptype=crashpad-handler --database=C:\Users\py252\AppData\Local\Packages\Mi
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=gpu-process --gpu-recent-crash-count=0 --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\Packages\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\LocalState\EBWebView" --webview-exe-name=M365Copilot.exe --webview-exe-version=19.2610.35011.0 --embedded-browser-webview=1 --embedded-browser-webvie
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\Packages\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\LocalState\EBWebView" --webview-exe-name=M365Copilot.exe --webview-exe-version=19.2610.3501
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=storage.mojom.StorageService --lang=zh-CN --service-sandbox-type=service --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\Packages\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\LocalState\EBWebView" --webview-exe-name=M365Copilot.exe --webview-exe-version=19.2610.3
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=renderer --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\Packages\Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\LocalState\EBWebView" --webview-exe-name=M365Copilot.exe --webview-exe-version=19.2610.35011.0 --embedded-browser-webview=1 --embedded-browser-webview-dpi-awareness=2 --video-capt
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --embedded-browser-webview=1 --webview-exe-name=MSPCManager.exe --webview-exe-version=3.23.0.0+bcd735467bdb2bcf4b835a6dfb770af5b5de0e6b --user-data-dir="C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView" --noerrdialogs --embedded-browser-webview-dpi-awareness=2 --enable-features=msSingleSignO
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=crashpad-handler "--user-data-dir=C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView" /prefetch:4 /pfhostedapp:c2a6e96abfe4bf92a088c82b26fd8cf7a68aa489 --monitor-self-annotation=ptype=crashpad-handler "--database=C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView\Crashpad"
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=gpu-process --gpu-recent-crash-count=0 --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView" --webview-exe-name=MSPCManager.exe --webview-exe-version=3.23.0.0+bcd735467bdb2bcf4b835a6dfb770af5b5de0e6b --embedded-browser-webview=1 --embedded-browser-webview-d
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView" --webview-exe-name=MSPCManager.exe --webview-exe-version=3.23.0.0+bcd735467bdb2bcf4b835a6dfb770af5b5de0e6b
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=storage.mojom.StorageService --lang=zh-CN --service-sandbox-type=service --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView" --webview-exe-name=MSPCManager.exe --webview-exe-version=3.23.0.0+bcd735467bdb2bcf4b835a6dfb770af5b5de0
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=renderer --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\PC Manager Store\webview2\EBWebView" --webview-exe-name=MSPCManager.exe --webview-exe-version=3.23.0.0+bcd735467bdb2bcf4b835a6dfb770af5b5de0e6b --embedded-browser-webview=1 --embedded-browser-webview-dpi-awareness=2 --video-capture
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --embedded-browser-webview=1 --webview-exe-name=PaperAI.exe --webview-exe-version=0.2.0 --user-data-dir="C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView" --noerrdialogs --embedded-browser-webview-dpi-awareness=2 --autoplay-policy=no-user-gesture-required --disable-features=msWebOOUI,msPdfOOUI,msS
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=crashpad-handler --user-data-dir=C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView /prefetch:4 /pfhostedapp:15effc6bc5cc5991de9194aca0c2e623cbb1573e --monitor-self-annotation=ptype=crashpad-handler --database=C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView\Crashpad --metrics-dir=C
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=gpu-process --gpu-recent-crash-count=0 --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView" --webview-exe-name=PaperAI.exe --webview-exe-version=0.2.0 --embedded-browser-webview=1 --embedded-browser-webview-dpi-awareness=2 --gpu-preferences=WAAAAAAAAADgAAAEAAAAA
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=zh-CN --service-sandbox-type=none --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView" --webview-exe-name=PaperAI.exe --webview-exe-version=0.2.0 --embedded-browser-webview=1 --embedded-browser-webvi
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=utility --utility-sub-type=storage.mojom.StorageService --lang=zh-CN --service-sandbox-type=service --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView" --webview-exe-name=PaperAI.exe --webview-exe-version=0.2.0 --embedded-browser-webview=1 --embedded-browser-we
+  --remote-debugging-port : no
+  --user-data-dir         : YES
+  --disable-renderer-backgrounding : no
+  port value              : (absent)
+  full cmdline (first 400): "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\155.0.4283.45\msedgewebview2.exe" --type=renderer --noerrdialogs --user-data-dir="C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView" --webview-exe-name=PaperAI.exe --webview-exe-version=0.2.0 --embedded-browser-webview=1 --embedded-browser-webview-dpi-awareness=2 --autoplay-policy=no-user-gesture-required --video-capture-use-gpu-me
+port 9800: DOWN

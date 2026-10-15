@@ -1,0 +1,7 @@
+﻿--- Edge policies (HKLM) ---
+  (none)
+--- Edge policies (HKCU) ---
+  (none)
+--- WebView2 runtime pv ---
+pv = 155.0.4283.45
+msedge 155.0.4283.45

@@ -1,0 +1,22 @@
+# S0 evidence — versions and build state
+
+## git
+de3e62d verify: cross-reader annotation evidence, retract bogus K-04
+82b987f Phase 2 wrap-up: clear both blockers
+d291a7f fix: markClean always notifies (window title stopped syncing after open)
+
+branch: phase2
+
+status: ?? reports/AI_S0_BASELINE.md
+?? scripts/probe-cdp-fix.mjs
+?? scripts/probe-cdp-rootcause.mjs
+?? scripts/probe-wv2-cmdline.mjs
+?? scripts/probe-wv2-pipe.mjs
+
+
+## versions
+pdfjs-dist package.json: 6.4.299
+pdfjs-dist installed  : 6.4.299
+tauri.conf version     : 0.2.0
+fileAssociations       : null
+installerHooks         : installer-hooks.nsh

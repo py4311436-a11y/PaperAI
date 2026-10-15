@@ -1,0 +1,12 @@
+D:\Program Files\workBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:243
+            throw new Error(detail);
+                  ^
+
+Error: [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":382,"threshold":50,"scope":"turn","targets":["D:\\PaperAI-Build\\edge-dbg-a"],"targetCount":1}
+    at checkBulkDeleteGuard (D:\Program Files\workBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:243:19)
+    at tryTrash (D:\Program Files\workBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:595:5)
+    at tryRm (D:\Program Files\workBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:789:5)
+    at wrappedRmSync (D:\Program Files\workBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:795:15)
+    at file:///D:/AIreader/PaperAI-PoC/scripts/probe-cdp-rootcause.mjs:35:3
+
+Node.js v22.22.2

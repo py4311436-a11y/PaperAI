@@ -1,0 +1,9 @@
+port only (the old, broken recipe)
+   => DOWN after 18s
+   window title: PaperAI �� IEEE ˫�� ���� ����.pdf
+port + FRESH user-data-dir
+   => DOWN after 18s
+   window title: PaperAI �� IEEE ˫�� ���� ����.pdf
+port + fresh dir + anti-throttle
+   => DOWN after 18s
+   window title: PaperAI �� IEEE ˫�� ���� ����.pdf

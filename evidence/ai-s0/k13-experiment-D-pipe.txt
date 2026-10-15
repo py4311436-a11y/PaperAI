@@ -1,0 +1,29 @@
+named pipes present: 463
+matching devtools/webview: \\.\pipe\mojo.uc::webview_service::WebViewService_quark_fallback
+all pipes: \\.\pipe\InitShutdown, \\.\pipe\lsass, \\.\pipe\ntsvcs, \\.\pipe\Winsock2\CatalogChangeListener-500-0, \\.\pipe\Winsock2\CatalogChangeListener-634-0, \\.\pipe\epmapper, \\.\pipe\Winsock2\CatalogChangeListener-454-0, \\.\pipe\Winsock2\CatalogChangeListener-660-0, \\.\pipe\LSM_API_service, \\.\pipe\atsvc, \\.\pipe\Winsock2\CatalogChangeListener-cf8-0, \\.\pipe\eventlog, \\.\pipe\Winsock2\CatalogChangeListener-d34-0, \\.\pipe\Winsock2\CatalogChangeListener-108c-0, \\.\pipe\wkssvc, \\.\pipe\NvMessageBusBroadcastNVIDIA.Display.Driver, \\.\pipe\Bettbox.Helper, \\.\pipe\trkwks, \\.\pipe\srvsvc, \\.\pipe\BreakpadCrashServices\EL_DISPLAY_PIG, \\.\pipe\vmware-authdpipe, \\.\pipe\NvMessageBusBroadcast, \\.\pipe\978d00dd-bda2-43f3-8bc0-3d926f7058ff, \\.\pipe\WiFiNetworkManagerTask, \\.\pipe\dotnet-diagnostic-7836, \\.\pipe\OpenAI.CodexSandbox.OpenAI.Codex_2p2nqsd0c76g0, \\.\pipe\A262AD1E-C7E0-42C3-8A20-E532F767EEEE_16308, \\.\pipe\PIPE_EVENTROOT\CIMV2SCM EVENT PROVIDER, \\.\pipe\A262AD1E-C7E0-42C3-8A20-E532F767EEEE_Global\966DDA87-F543-42B4-B6CE-A1225068B7C7, \\.\pipe\Winsock2\CatalogChangeListener-4e4-0, \\.\pipe\{F685F498-BFDE-49D3-8132-D708F76B990E}, \\.\pipe\{641B073C-E4A8-4FC1-82CE-CEE579CD0BE6}, \\.\pipe\MsFteWds, \\.\pipe\3FB6A1B2-40E0-43C3-AD6D-39A499FBCFB0_1, \\.\pipe\dotnet-diagnostic-11552, \\.\pipe\BackingAppCommandPipe, \\.\pipe\NvWksServiceDdisplayPipe, \\.\pipe\mojo.11384.15380.12071265359505405962, \\.\pipe\mojo.11384.15380.2456699175687329145, \\.\pipe\mojo.11384.15380.2739538535113612462
+
+msedgewebview2 cmdlines: 24
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
+  has --remote-debugging-pipe: no
