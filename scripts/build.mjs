@@ -13,6 +13,7 @@
  * `scripts/verify-release-bundle.mjs` asserts that it really is gone.
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
@@ -43,6 +44,26 @@ if (tsc.status !== 0) {
 }
 
 // 3. Bundle with the flag pinned.
+//
+// Vite empties `outDir` by default, and the installer lives in `dist/installer`
+// — so a plain rebuild silently DELETED the shipped setup.exe. That happened
+// once during this round and the artefact had to be recovered from the Cargo
+// target directory. Preserve it explicitly rather than relying on the operator
+// to remember.
+const installerDir = path.join(ROOT, "dist", "installer");
+// NOTE: the stash must live OUTSIDE dist/. Vite's emptyOutDir removes the whole
+// directory tree, so a stash inside it is deleted along with the installer —
+// which is exactly the bug this code exists to prevent.
+const stash = path.join(ROOT, ".installer-stash");
+let preserved = [];
+if (existsSync(installerDir)) {
+  mkdirSync(stash, { recursive: true });
+  for (const f of readdirSync(installerDir)) {
+    renameSync(path.join(installerDir, f), path.join(stash, f));
+    preserved.push(f);
+  }
+}
+
 const vite = path.join(ROOT, "node_modules", "vite", "bin", "vite.js");
 const r = spawnSync(process.execPath, [vite, "build"], {
   cwd: ROOT,
@@ -52,6 +73,16 @@ const r = spawnSync(process.execPath, [vite, "build"], {
     VITE_PAPERAI_AUTOMATION: automation ? "1" : "0",
   },
 });
+
+if (preserved.length) {
+  mkdirSync(installerDir, { recursive: true });
+  for (const f of preserved) {
+    renameSync(path.join(stash, f), path.join(installerDir, f));
+  }
+  rmdirSync(stash, { recursive: true, force: true });
+  console.log(`preserved ${preserved.length} installer(s) in dist/installer/`);
+}
+
 if (r.status !== 0) process.exit(r.status ?? 1);
 
 console.log(`\nbuilt flavour: ${automation ? "automation (test bridge PRESENT)" : "release (test bridge ABSENT)"}`);

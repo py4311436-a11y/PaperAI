@@ -13,3 +13,5 @@ evidence/stage-d/edge-pw-profile/
 evidence/stage-d/edge-gdi2-profile/
 evidence/stage-b/edge-ctrl-profile/
 evidence/stage-b/edge-profile/
+.installer-stash/
+.installer-stash/

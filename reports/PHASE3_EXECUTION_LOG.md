@@ -160,3 +160,22 @@ Their Rust-level equivalents pass.
 Bugs 7–9 are test-harness defects, not product defects. They are recorded
 because a harness bug that manufactures a red result is exactly as misleading as
 one that manufactures a green one.
+
+---
+
+## 交付后复查：构建脚本会删掉安装包
+
+收尾时执行 `npm run build:release` 复核 K-03，随后发现
+`dist/installer/PaperAI_0.3.0_x64-setup.exe` **不见了**。
+
+原因：Vite 默认 `emptyOutDir`，会清空整个 `dist/` —— 而安装包按交付约定就放在
+`dist/installer/`。第一次修复把暂存目录放在 `dist/.installer-stash`，同样被一起
+删掉（又一次验证了"目录被整体清空"这一点）。最终把暂存目录移到项目根的
+`.installer-stash/`（已加入 .gitignore），构建脚本在 vite 前后搬运安装包，并在
+输出里报告搬了几个。
+
+产物已从 `D:/PaperAI-Build/target/release/bundle/nsis/` 恢复，SHA-256 与报告中
+记录的一致（`cfabb175…`），说明恢复的是同一个字节序列，不是重新构建的新文件。
+
+这类问题值得记下来：**一个会静默删除交付物的构建脚本，比一个构建失败的脚本
+危险得多** —— 构建失败会立刻发现，删除不会。
