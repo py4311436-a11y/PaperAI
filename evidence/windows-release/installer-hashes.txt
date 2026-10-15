@@ -1,0 +1,2 @@
+dist/installer/PaperAI_0.3.0_x64-setup.exe | 5726436 bytes | sha256 cfabb1750fa2bcdfa94e26a3d0a9b25a4489545827b51a5cfb0443c04fc98186
+dist/installer/PaperAI_0.2.0_x64-setup.exe | 11681450 bytes | sha256 3f5a840984c851603b9d87232f0f9b77312a62b88a6174133961ccdd26e69635
