@@ -114,10 +114,15 @@ body {
 }
 
 /* PDFViewer 6.x hard-requires the container to be position:absolute
-   (checked at construction time when container.offsetParent is non-null). */
+   (checked at construction time when container.offsetParent is non-null).
+   NOTE: #viewerContainer now lives inside #viewer-wrap, which is itself
+   positioned, so it becomes the offsetParent. The insets are therefore 0 —
+   the toolbar/status offsets are already excluded by #viewer-wrap's own box in
+   the flex column. Re-adding them here would double-count and push the pages
+   off screen. */
 #viewerContainer {
   position: absolute;
-  top: calc(var(--bar-h) + var(--status-h));
+  top: 0;
   left: 0;
   right: 0;
   bottom: 0;

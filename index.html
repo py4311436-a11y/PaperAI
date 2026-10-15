@@ -25,6 +25,8 @@
         <button id="btn-fit-page" data-testid="fit-page">Fit Page</button>
         <span class="sep"></span>
         <span id="page-indicator" data-testid="page">- / -</span>
+        <span class="sep"></span>
+        <button id="btn-ai" data-testid="ai-toggle" title="AI 阅读助手（选中文字后可解释/翻译）">AI</button>
       </header>
 
       <div id="status-bar">
@@ -35,13 +37,19 @@
         <span id="status-sel" data-testid="status-sel"></span>
       </div>
 
-      <div id="viewerContainer">
-        <!-- The `pdfViewer` class is REQUIRED: pdf_viewer.css defines
-             --total-scale-factor / --scale-round-x on `.pdfViewer .page`.
-             Without it the inline `round(down, var(--total-scale-factor) * Npx, ...)`
-             size PDF.js sets on each page is invalid, every .page collapses to
-             0x0, and nothing renders. PDFViewer does not add the class itself. -->
-        <div id="viewer" class="pdfViewer"></div>
+      <!-- #viewer-wrap is position:relative so the selection float bar can be
+           absolutely positioned against it; #ai-panel is appended by main.ts. -->
+      <div id="main-split">
+        <div id="viewer-wrap">
+          <div id="viewerContainer">
+            <!-- The `pdfViewer` class is REQUIRED: pdf_viewer.css defines
+                 --total-scale-factor / --scale-round-x on `.pdfViewer .page`.
+                 Without it the inline `round(down, var(--total-scale-factor) * Npx, ...)`
+                 size PDF.js sets on each page is invalid, every .page collapses to
+                 0x0, and nothing renders. PDFViewer does not add the class itself. -->
+            <div id="viewer" class="pdfViewer"></div>
+          </div>
+        </div>
       </div>
 
       <div id="toast" data-testid="toast"></div>

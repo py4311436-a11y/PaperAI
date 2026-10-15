@@ -1,0 +1,4 @@
+scanned 5 asset(s) under dist
+test-bridge markers found: 0
+
+PASS — release build does NOT contain the test bridge

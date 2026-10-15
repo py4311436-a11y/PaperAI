@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "outDir": "dist-test",
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false,
+    "allowJs": false,
+    "types": ["node"]
+  },
+  "include": [
+    "src/ai/context-builder.ts",
+    "src/ai/chat-controller.ts",
+    "src/ai/markdown-renderer.ts",
+    "src/ai/types.ts",
+    "tests/ai-unit/run.ts"
+  ]
+}

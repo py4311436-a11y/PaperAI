@@ -1,0 +1,318 @@
+/**
+ * Chat state machine with per-document session isolation.
+ *
+ * The rule that keeps documents from bleeding into each other: every request
+ * carries a `requestId`, and events for an id that is no longer current are
+ * **dropped**, not appended. Switching documents or asking a new question
+ * retires the previous id, so a late delta from a cancelled request can never
+ * appear in the new document's transcript.
+ *
+ * Exactly one terminal event per request is enforced here as well: once a turn
+ * reaches completed/cancelled/error it stops accepting deltas, so the UI can
+ * never be stuck showing "generating".
+ */
+
+import type { ChatMessage, ChatPhase, ChatTurn, ContextMode, ContextStats } from "./types";
+
+export interface ChatControllerDeps {
+  /** Send a request and feed events back through `onEvent`. */
+  startChat: (
+    requestId: string,
+    profileId: string,
+    messages: ChatMessage[],
+    onEvent: (ev: import("./types").AiStreamEvent) => void,
+    temperature?: number
+  ) => Promise<void>;
+  cancelChat: (requestId: string) => Promise<boolean>;
+  onChange: () => void;
+  newId: () => string;
+  now?: () => number;
+}
+
+/** One document's transcript. Discarded when the document closes. */
+interface Session {
+  documentId: string;
+  turns: ChatTurn[];
+  /** The request that is allowed to append to this session. */
+  activeRequestId: string | null;
+  contextMode: ContextMode;
+  profileId: string | null;
+}
+
+const TERMINAL: ChatPhase[] = ["completed", "cancelled", "error"];
+
+function isTerminal(p: ChatPhase): boolean {
+  return TERMINAL.includes(p);
+}
+
+export class ChatController {
+  private sessions = new Map<string, Session>();
+  private currentDocumentId: string | null = null;
+  /** Incremented per request so a stale channel callback is ignored. */
+  private generation = 0;
+
+  constructor(private deps: ChatControllerDeps) {}
+
+  // ------------------------------------------------------------- sessions
+
+  openDocument(documentId: string | null): void {
+    if (documentId === this.currentDocumentId) return;
+
+    // Retire the outgoing document's in-flight request BEFORE switching the
+    // pointer. Three things have to happen together, and the third is the one
+    // that is easy to miss:
+    //   1. ask the backend to stop it;
+    //   2. clear its activeRequestId on the old session;
+    //   3. bump the generation so already-queued deltas are dropped.
+    // Without (3) a delta that was already in the event queue lands in the
+    // *original* document's transcript after the user has left it, and silently
+    // appears if they later switch back. Covered by
+    // "a late delta cannot leak into the document the user switched to".
+    const old = this.session();
+    if (old?.activeRequestId) {
+      const reqId = old.activeRequestId;
+      const turn = old.turns.find((t) => t.id === reqId);
+      if (turn && !isTerminal(turn.phase)) {
+        turn.phase = "cancelled";
+      }
+      old.activeRequestId = null;
+      void this.deps.cancelChat(reqId).catch(() => false);
+    }
+    this.generation++;
+
+    this.currentDocumentId = documentId;
+    if (documentId && !this.sessions.has(documentId)) {
+      this.sessions.set(documentId, {
+        documentId,
+        turns: [],
+        activeRequestId: null,
+        contextMode: "selection",
+        profileId: null,
+      });
+    }
+    this.deps.onChange();
+  }
+
+  /** Drop a document's transcript (closing the file). */
+  closeDocument(documentId: string): void {
+    this.sessions.delete(documentId);
+    if (this.currentDocumentId === documentId) {
+      this.currentDocumentId = null;
+    }
+    this.deps.onChange();
+  }
+
+  private session(): Session | null {
+    if (!this.currentDocumentId) return null;
+    return this.sessions.get(this.currentDocumentId) ?? null;
+  }
+
+  turns(): ChatTurn[] {
+    return this.session()?.turns.slice() ?? [];
+  }
+
+  contextMode(): ContextMode {
+    return this.session()?.contextMode ?? "selection";
+  }
+
+  setContextMode(mode: ContextMode): void {
+    const s = this.session();
+    if (!s) return;
+    s.contextMode = mode;
+    this.deps.onChange();
+  }
+
+  profileId(): string | null {
+    return this.session()?.profileId ?? null;
+  }
+
+  setProfileId(id: string | null): void {
+    const s = this.session();
+    if (!s) return;
+    s.profileId = id;
+    this.deps.onChange();
+  }
+
+  isBusy(): boolean {
+    const s = this.session();
+    if (!s?.activeRequestId) return false;
+    const t = s.turns.find((x) => x.id === s.activeRequestId);
+    return !!t && !isTerminal(t.phase);
+  }
+
+  // --------------------------------------------------------------- sending
+
+  /**
+   * Append the user turn and start streaming the assistant turn.
+   * Returns the assistant turn id, or null when there is nothing to send.
+   */
+  async send(opts: {
+    question: string;
+    messages: ChatMessage[];
+    contextLabel: string;
+    stats: ContextStats;
+  }): Promise<string | null> {
+    const s = this.session();
+    if (!s) return null;
+    if (this.isBusy()) return null;
+    const profileId = s.profileId;
+    if (!profileId) return null;
+
+    const now = this.deps.now ?? Date.now;
+    const userTurn: ChatTurn = {
+      id: this.deps.newId(),
+      role: "user",
+      content: opts.question,
+      phase: "completed",
+      contextLabel: `${opts.contextLabel} · ${describeStats(opts.stats)}`,
+      createdAt: now(),
+    };
+    const assistantTurn: ChatTurn = {
+      id: this.deps.newId(),
+      role: "assistant",
+      content: "",
+      phase: "preparing",
+      contextLabel: opts.contextLabel,
+      createdAt: now(),
+    };
+    s.turns.push(userTurn, assistantTurn);
+
+    const requestId = assistantTurn.id;
+    s.activeRequestId = requestId;
+    const myGeneration = ++this.generation;
+    // Remember which session this request belongs to: the callback must not
+    // write into a different document's transcript.
+    const ownerDocument = s.documentId;
+    this.deps.onChange();
+
+    const accept = (): Session | null => {
+      if (myGeneration !== this.generation) return null;
+      const target = this.sessions.get(ownerDocument);
+      if (!target || target.activeRequestId !== requestId) return null;
+      const turn = target.turns.find((t) => t.id === requestId);
+      if (!turn || isTerminal(turn.phase)) return null;
+      return target;
+    };
+
+    try {
+      await this.deps.startChat(
+        requestId,
+        profileId,
+        opts.messages,
+        (ev) => {
+          const target = accept();
+          if (!target) return; // stale — dropped on purpose
+          const turn = target.turns.find((t) => t.id === requestId)!;
+          switch (ev.type) {
+            case "started":
+              turn.phase = "streaming";
+              break;
+            case "delta":
+              turn.phase = "streaming";
+              turn.content += ev.text;
+              break;
+            case "completed":
+              turn.phase = "completed";
+              target.activeRequestId = null;
+              break;
+            case "cancelled":
+              turn.phase = "cancelled";
+              target.activeRequestId = null;
+              break;
+            case "error":
+              turn.phase = "error";
+              turn.errorCode = ev.code;
+              turn.errorMessage = ev.safe_message;
+              target.activeRequestId = null;
+              break;
+          }
+          this.deps.onChange();
+        }
+      );
+    } catch (e) {
+      // The IPC call itself failed (e.g. no key stored). Surface it on the
+      // turn rather than throwing into the caller's click handler.
+      const target = accept();
+      if (target) {
+        const turn = target.turns.find((t) => t.id === requestId)!;
+        turn.phase = "error";
+        turn.errorMessage = String(e);
+        turn.errorCode = extractCode(e);
+        target.activeRequestId = null;
+        this.deps.onChange();
+      }
+    }
+
+    return requestId;
+  }
+
+  /** Ask the running request to stop. */
+  async cancelActive(): Promise<void> {
+    const s = this.session();
+    const id = s?.activeRequestId;
+    if (!s || !id) return;
+    const turn = s.turns.find((t) => t.id === id);
+    if (turn && !isTerminal(turn.phase)) {
+      turn.phase = "cancelling";
+      this.deps.onChange();
+    }
+    try {
+      await this.deps.cancelChat(id);
+    } catch {
+      /* the stream will end on its own */
+    }
+    // The backend will send `cancelled`; if it does not (already finished),
+    // settle the turn so the UI is not stuck.
+    const after = s.turns.find((t) => t.id === id);
+    if (after && !isTerminal(after.phase) && after.phase === "cancelling") {
+      after.phase = "cancelled";
+      s.activeRequestId = null;
+      this.deps.onChange();
+    }
+  }
+
+  /** Clear the transcript for the current document (keep the context mode). */
+  newConversation(): void {
+    const s = this.session();
+    if (!s) return;
+    void this.cancelActive();
+    s.turns = [];
+    s.activeRequestId = null;
+    this.generation++;
+    this.deps.onChange();
+  }
+
+  /**
+   * Recent (user, assistant) pairs to send as history.
+   *
+   * Bounded on purpose: re-sending the whole transcript every turn makes cost
+   * grow quadratically. Only *completed* assistant turns qualify — a cancelled
+   * or failed one carries no usable answer.
+   */
+  history(limit = 6): ChatMessage[] {
+    const s = this.session();
+    if (!s) return [];
+    const out: ChatMessage[] = [];
+    for (let i = 0; i < s.turns.length; i++) {
+      const t = s.turns[i];
+      if (t.role !== "assistant" || t.phase !== "completed" || !t.content.trim()) continue;
+      const prev = s.turns[i - 1];
+      if (prev?.role === "user") out.push({ role: "user", content: prev.content });
+      out.push({ role: "assistant", content: t.content });
+    }
+    return out.slice(-limit);
+  }
+}
+
+function describeStats(s: ContextStats): string {
+  return s.chars ? `${s.chars} 字 / 约 ${s.approx_tokens} tokens` : "无文献内容";
+}
+
+/** Tauri rejects with a plain string or `{code,message}`; normalise both. */
+function extractCode(e: unknown): string | undefined {
+  if (typeof e === "object" && e && "code" in e) {
+    return String((e as { code: unknown }).code);
+  }
+  const m = /\[([a-z_]+)\]/.exec(String(e));
+  return m?.[1];
+}

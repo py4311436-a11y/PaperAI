@@ -596,19 +596,70 @@ export class PdfjsAdapter {
 
   /* -------------------------------------------------------------- Geometry */
 
-  /** Text-layer spans matching `needle`, with viewport geometry. */
-  getSpanRects(needle: string, limit = 8): Array<{ text: string; x: number; y: number; w: number; h: number; page: number }> {
-    const out: Array<{ text: string; x: number; y: number; w: number; h: number; page: number }> = [];
-    this.container.querySelectorAll<HTMLElement>(".page").forEach((pg) => {
-      const pageNo = Number(pg.dataset.pageNumber ?? 0);
-      pg.querySelectorAll<HTMLElement>(".textLayer span").forEach((s) => {
-        if (out.length >= limit) return;
-        if ((s.textContent ?? "").includes(needle)) {
-          const b = s.getBoundingClientRect();
-          out.push({ text: (s.textContent ?? "").slice(0, 60), x: b.x, y: b.y, w: b.width, h: b.height, page: pageNo });
+  /**
+   * Text-layer spans matching `needle`, with viewport geometry.
+   *
+   * NOTE: this used to live on the adapter, but its only caller was the
+   * automation test bridge. It now lives there instead, so the release bundle
+   * genuinely does not contain it (K-03) rather than merely not exposing it.
+   */
+
+  /**
+   * Extracted text of one page (1-based), for AI context building.
+   *
+   * Read-only and side-effect free: it never changes the selection, the tool or
+   * the scroll position. Returns "" when the page has no text layer (a scanned
+   * page), which the caller must surface as "no selectable text" rather than
+   * pretending OCR happened.
+   *
+   * The text comes from the rendered text layer rather than `getTextContent()`
+   * so it matches exactly what the user can select on screen.
+   */
+  getPageText(pageNumber: number): string {
+    const pg = this.container.querySelector<HTMLElement>(`.page[data-page-number="${pageNumber}"]`);
+    if (!pg) return "";
+    const layer = pg.querySelector<HTMLElement>(".textLayer");
+    if (!layer) return "";
+
+    // PDF.js puts one span per text run; joining with a space keeps words from
+    // running together when a run boundary falls mid-sentence. Line breaks come
+    // from the `br` elements the layer inserts.
+    const parts: string[] = [];
+    const walk = (node: Node) => {
+      for (const child of Array.from(node.childNodes)) {
+        if (child.nodeType === 3) {
+          const t = child.textContent ?? "";
+          if (t.trim()) parts.push(t);
+        } else if (child.nodeType === 1) {
+          const e = child as HTMLElement;
+          if (e.tagName === "BR") {
+            parts.push("\n");
+          } else if (e.classList.contains("endOfContent")) {
+            // sentinel element, ignores pointer events; no text of its own
+          } else {
+            walk(e);
+          }
         }
-      });
-    });
-    return out;
+      }
+    };
+    walk(layer);
+
+    return parts
+      .join(" ")
+      .replace(/ *\n */g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  /** True when this page has no extractable text (scanned / empty page). */
+  pageHasText(pageNumber: number): boolean {
+    return this.getPageText(pageNumber).length > 0;
+  }
+
+  /** 1-based page currently at the top of the viewport. */
+  get currentPage(): number {
+    const n = (this.pdfViewer as unknown as { currentPageNumber?: number })?.currentPageNumber;
+    return typeof n === "number" && n > 0 ? n : 1;
   }
 }

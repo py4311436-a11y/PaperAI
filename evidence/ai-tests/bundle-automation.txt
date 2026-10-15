@@ -1,0 +1,9 @@
+scanned 5 asset(s) under dist
+test-bridge markers found: 5
+    loadByArrayBuffer  in  dist\assets\index-7FOtqfQI.js
+    saveRequest  in  dist\assets\index-7FOtqfQI.js
+    getSpanRects  in  dist\assets\index-7FOtqfQI.js
+    __verifyLoaded  in  dist\assets\index-7FOtqfQI.js
+    __paperaiPickFile  in  dist\assets\index-7FOtqfQI.js
+
+PASS — automation build does contain the test bridge

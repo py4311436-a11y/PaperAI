@@ -152,3 +152,92 @@ export function toBase64(bytes: Uint8Array): string {
   }
   return btoa(out);
 }
+
+/* ------------------------------------------------------------------ AI ---- */
+
+import type {
+  AiProfile,
+  AiStreamEvent,
+  ChatMessage,
+  ConnectionTest,
+  ProfileStatus,
+} from "./ai/types";
+import { Channel } from "@tauri-apps/api/core";
+
+export async function aiListProfiles(): Promise<ProfileStatus[]> {
+  return await invoke<ProfileStatus[]>("ai_list_profiles");
+}
+
+export async function aiDeepSeekPreset(): Promise<AiProfile> {
+  return await invoke<AiProfile>("ai_deepseek_preset");
+}
+
+export async function aiSaveProfile(profile: AiProfile): Promise<ProfileStatus> {
+  return await invoke<ProfileStatus>("ai_save_profile", { profile });
+}
+
+export async function aiDeleteProfile(id: string, deleteCredential: boolean): Promise<void> {
+  await invoke("ai_delete_profile", { id, deleteCredential });
+}
+
+/**
+ * Store or replace the API key. There is deliberately no counterpart that reads
+ * it back — the UI can only ask whether one exists.
+ */
+export async function aiSetKey(profileId: string, key: string): Promise<void> {
+  await invoke("ai_set_key", { profileId, key });
+}
+
+export async function aiDeleteKey(profileId: string): Promise<void> {
+  await invoke("ai_delete_key", { profileId });
+}
+
+export async function aiHasKey(profileId: string): Promise<boolean> {
+  return await invoke<boolean>("ai_has_key", { profileId });
+}
+
+export async function aiTestConnection(
+  profileId: string,
+  baseUrl?: string,
+  model?: string
+): Promise<ConnectionTest> {
+  return await invoke<ConnectionTest>("ai_test_connection", { profileId, baseUrl, model });
+}
+
+export async function aiCancelChat(requestId: string): Promise<boolean> {
+  return await invoke<boolean>("ai_cancel_chat", { requestId });
+}
+
+export async function aiCancelAll(): Promise<number> {
+  return await invoke<number>("ai_cancel_all");
+}
+
+export async function aiActiveRequests(): Promise<number> {
+  return await invoke<number>("ai_active_requests");
+}
+
+/**
+ * Start a streamed completion.
+ *
+ * `onEvent` receives every event the backend emits for this request. The
+ * promise resolves when the backend has spawned the task, not when the answer
+ * finishes — deltas arrive later through the channel.
+ */
+export async function aiStartChat(
+  requestId: string,
+  profileId: string,
+  messages: ChatMessage[],
+  onEvent: (ev: AiStreamEvent) => void,
+  temperature?: number
+): Promise<void> {
+  const channel = new Channel<AiStreamEvent>();
+  channel.onmessage = onEvent;
+  await invoke("ai_start_chat", {
+    requestId,
+    profileId,
+    messages,
+    temperature,
+    sink: channel,
+  });
+}
+
