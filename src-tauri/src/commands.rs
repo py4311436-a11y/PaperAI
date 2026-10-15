@@ -86,3 +86,21 @@ pub fn save_document(req: SaveRequest) -> SaveResult {
 pub fn take_pending_files(state: tauri::State<'_, crate::PendingFiles>) -> Vec<String> {
     state.take()
 }
+
+/// Read-only scan for a recoverable save (K-07). Safe to call on every open.
+///
+/// Reports; never touches the filesystem. Restoring requires an explicit
+/// [`apply_save_recovery`] call with the user's choice.
+#[tauri::command]
+pub fn scan_save_recovery(path: String) -> crate::recovery::RecoveryReport {
+    crate::recovery::scan(&path)
+}
+
+/// Apply the user's explicit recovery choice. Idempotent.
+#[tauri::command]
+pub fn apply_save_recovery(
+    path: String,
+    action: crate::recovery::RecoveryAction,
+) -> AppResult<crate::recovery::RecoveryResult> {
+    crate::recovery::apply(&path, action)
+}

@@ -241,6 +241,17 @@ fn save_pdf_inner(req: SaveRequest) -> AppResult<SaveResult> {
 
     let old = target.with_extension("pdf.paperai.old");
     let mut staged = false;
+
+    // Crash simulation BEFORE the staging rename (K-07).
+    // Nothing has moved yet, so the user's document is still intact.
+    if inject == "crash_before_stage" {
+        return fail(
+            codes::SAVE_INJECTED,
+            "注入故障: 在 target->.old 之前崩溃 — 原件未改动",
+            Some(&temp),
+        );
+    }
+
     if target.exists() {
         // Free the path first: Windows rename cannot overwrite.
         if let Err(e) = fs::rename(&target, &old) {
@@ -253,8 +264,40 @@ fn save_pdf_inner(req: SaveRequest) -> AppResult<SaveResult> {
         staged = true;
     }
 
+    // Crash simulation AFTER the staging rename, before the temp is promoted.
+    // This is the data-loss window: the document is currently MISSING and the
+    // only copy is `.old`. `recovery.rs` exists for exactly this state.
+    // Deliberately does NOT clean up the temp file.
+    if inject == "crash_after_stage" {
+        return Err(AppError::new(
+            codes::SAVE_INJECTED,
+            format!(
+                "注入故障: 在 target->.old 之后崩溃 — 文档当前缺失，副本在 {}",
+                old.display()
+            ),
+        ));
+    }
+
     match fs::rename(&temp, &target) {
         Ok(()) => {
+            if inject == "crash_after_replace" {
+                // New content is in place; only the cleanup of `.old` is
+                // missing. Recovery should recognise this as "the document is
+                // fine", NOT as data loss.
+                return Ok(SaveResult {
+                    ok: true,
+                    code: codes::SAVE_INJECTED.to_string(),
+                    message: format!(
+                        "注入故障: 在 temp->target 之后崩溃 — 新内容已就位，遗留 {}",
+                        old.display()
+                    ),
+                    target: target.to_string_lossy().to_string(),
+                    bytes: fs::metadata(&target).map(|m| m.len()).unwrap_or(0),
+                    sha256: sha256_of_file(&target).unwrap_or_default(),
+                    backup_path,
+                    leftover_temp: Some(old.to_string_lossy().to_string()),
+                });
+            }
             if staged {
                 let _ = fs::remove_file(&old);
             }

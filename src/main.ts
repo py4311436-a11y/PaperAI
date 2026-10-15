@@ -295,8 +295,45 @@ async function askQuestion(question: string): Promise<void> {
 
 /* ============================================================== PDF open == */
 
+/**
+ * Run the recovery scan for a path the user is about to open.
+ *
+ * Read-only: it reports and asks; it never moves files on its own. Only a
+ * confirmed choice is applied, and applying is idempotent.
+ *
+ * Returns false only when the user must not proceed (currently never — the
+ * "decide later" path opens the document as-is).
+ */
+async function runRecoveryCheck(path: string): Promise<void> {
+  if (!bridge.isTauri) return;
+  try {
+    const report = await bridge.scanRecovery(path);
+    if (!report.needs_recovery && !report.candidates.some((c) => c.kind === "old")) {
+      // Nothing to do; tidy stray temp files quietly, since they are ours.
+      if (report.leftover_temps.length) {
+        void bridge.applyRecovery(path, "clean_temps").catch(() => undefined);
+      }
+      return;
+    }
+
+    const choice = await bridge.askRecovery(report.summary);
+    if (choice === "later") return;
+    const res = await bridge.applyRecovery(path, choice === "restore" ? "restore_old" : "keep_new");
+    toast(res.message, res.ok ? "success" : "error");
+    if (res.displaced_to) {
+      diagnostics.log("info", `recovery displaced previous content to ${res.displaced_to}`);
+    }
+  } catch (e) {
+    // A failed scan must never block opening a document.
+    diagnostics.log("warn", `recovery scan failed: ${String(e)}`);
+  }
+}
+
 async function openPath(rawPath: string): Promise<boolean> {
   try {
+    // Check for a crashed save before reading, so a missing/locked document
+    // gets a chance to be restored rather than reported as "not found".
+    await runRecoveryCheck(rawPath);
     const info = await bridge.invokeOpen(rawPath);
     const bytes = await bridge.readPdf(info.path);
     await adapter.open(bytes, info.name);

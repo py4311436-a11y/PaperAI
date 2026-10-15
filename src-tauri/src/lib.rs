@@ -1,13 +1,15 @@
 //! PaperAI desktop backend.
 
 // Public so the integration tests in `tests/` can drive the provider against
-// the local Mock SSE server without going through the Tauri IPC layer.
+// the local Mock SSE server, and the save/recovery pipeline against real files,
+// without going through the Tauri IPC layer.
 pub mod ai;
 
 mod commands;
 mod error;
 mod paths;
-mod save_service;
+pub mod recovery;
+pub mod save_service;
 
 use std::sync::Mutex;
 
@@ -134,7 +136,8 @@ pub fn run() {
             commands::sha256_of,
             commands::save_document,
             commands::take_pending_files,
-            // save-recovery commands are registered in S5 (K-07)
+            commands::scan_save_recovery,
+            commands::apply_save_recovery,
             ai::ai_list_profiles,
             ai::ai_deepseek_preset,
             ai::ai_save_profile,

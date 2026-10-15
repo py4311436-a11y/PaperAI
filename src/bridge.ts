@@ -241,3 +241,80 @@ export async function aiStartChat(
   });
 }
 
+/* ---------------------------------------------------- save recovery (K-07) -- */
+
+export interface RecoveryCandidate {
+  path: string;
+  kind: "old" | "bak" | "temp" | string;
+  bytes: number;
+  valid_pdf: boolean;
+  sha256: string;
+  invalid_reason: string | null;
+}
+
+export interface RecoveryReport {
+  target_exists: boolean;
+  target_bytes: number;
+  target_sha256: string;
+  target_invalid_reason: string | null;
+  candidates: RecoveryCandidate[];
+  needs_recovery: boolean;
+  leftover_temps: string[];
+  summary: string;
+}
+
+export interface RecoveryResult {
+  ok: boolean;
+  code: string;
+  message: string;
+  target: string;
+  restored_from: string | null;
+  displaced_to: string | null;
+}
+
+export type RecoveryAction = "restore_old" | "keep_new" | "clean_temps";
+
+/** Read-only scan. Never modifies anything — safe to call on every open. */
+export async function scanRecovery(path: string): Promise<RecoveryReport> {
+  return await invoke<RecoveryReport>("scan_save_recovery", { path });
+}
+
+/** Apply an explicit user choice. Idempotent. */
+export async function applyRecovery(
+  path: string,
+  action: RecoveryAction
+): Promise<RecoveryResult> {
+  return await invoke<RecoveryResult>("apply_save_recovery", { path, action });
+}
+
+/**
+ * Ask the user what to do about a recoverable save.
+ *
+ * Rendered in-app rather than via the dialog plugin so we can offer the real
+ * three-way choice (restore / keep current / decide later) and show it only
+ * when something is actually recoverable.
+ */
+export function askRecovery(summary: string): Promise<"restore" | "keep" | "later"> {
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    modal.id = "recovery-modal";
+    modal.innerHTML = `
+      <div class="rm-card">
+        <div class="rm-title">上次保存可能未完成</div>
+        <div class="rm-text">${escapeHtml(summary)}</div>
+        <div class="rm-actions">
+          <button data-act="restore" class="primary">恢复上一版本</button>
+          <button data-act="keep">保留当前文档</button>
+          <button data-act="later">稍后决定</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", (e) => {
+      const act = (e.target as HTMLElement)?.dataset?.act;
+      if (!act) return;
+      modal.remove();
+      resolve(act as "restore" | "keep" | "later");
+    });
+  });
+}
+
