@@ -1,0 +1,5 @@
+﻿process alive: True
+exit code: n/a
+port 9810 listening: 0
+PaperAI count: 1
+title: PaperAI

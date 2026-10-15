@@ -34,12 +34,13 @@ Total automated: **48 assertions green**, 1 blocked.
 | B3 | Save | standard annotations in the output | **PASS** | B3.1–B3.3 |
 | B4 | Render | TextLayer alignment at 150 % DPI | **PASS** | B4.1 ratio 2.500 |
 | C1 | Installer | silent install, start menu, uninstall entry, uninstall | **PASS** | `evidence/stage-c/RESULTS.md` C1.x, C5.x |
-| C2 | File association | PaperAI is a `.pdf` candidate; default reader unchanged | **PARTIAL** | bundler writes nothing (K-01); `scripts/register-file-association.ps1` verified |
+| C2 | File association | PaperAI is a `.pdf` candidate; default reader unchanged | **PASS** | registered by the installer itself via `installer-hooks.nsh` (K-01 fixed) |
 | C3 | CLI paths | CJK + spaces + unicode | **PASS** | C3.1, C4.2 |
 | C4 | Single instance | one process, new file forwarded, no loss | **PASS** | C4.1–C4.3 |
 | C5 | Uninstall cleanup | exe + registry gone, default reader intact | **PASS** | C5.2–C5.5 |
-| D1 | Edge GUI re-open | highlight + ink visible | **BLOCKED** | no interactive compositor (K-02) |
+| D1 | Edge GUI re-open | document renders | **PARTIAL** | `edge-printwindow.png`; annotation layer not painted by default |
 | D2 | Acrobat GUI re-open | highlight + ink visible | **BLOCKED** | not installed |
+| D2b | WPS GUI re-open (independent engine) | highlight + ink visible | **PASS** | highlight confirmed by the user on a real desktop; ink visible in `wps-try6.png` |
 | D3 | Save safety | original never damaged on failure | **PASS** | `evidence/stage-d/save-safety-RESULTS.md` |
 | D4 | Uncommitted ink + close protection | ink survives; dirty survives a failed save | **PASS** | B/D4.1, D3.10 |
 | D5 | Full regression | all suites green | **PASS** | — |

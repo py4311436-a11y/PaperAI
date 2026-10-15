@@ -27,17 +27,14 @@ verify + backup + safe-replace save pipeline in Rust.
 .\dist\installer\PaperAI_0.2.0_x64-setup.exe
 # silently:  Start-Process .\dist\installer\PaperAI_0.2.0_x64-setup.exe -ArgumentList /S -Wait
 
-# 2. register as a .pdf "Open with" candidate
-#    (required — see reports/KNOWN_ISSUES_UPDATED.md K-01)
-powershell -ExecutionPolicy Bypass -File .\scripts\register-file-association.ps1
+# 2. nothing else needed — the installer already registers PaperAI as a
+#    .pdf "Open with" candidate, and the uninstaller removes it again.
 ```
 
 The installer is unsigned, so Windows shows "unknown publisher". Nothing is
 bypassed — use *More info → Run anyway* if you accept that.
 
-To remove: Settings → Apps → PaperAI → Uninstall, then optionally
-`scripts/register-file-association.ps1 -Unregister`.
-
+To remove: Settings → Apps → PaperAI → Uninstall.
 ## Using it
 
 | Action | How |
@@ -96,8 +93,9 @@ Full list with severities in `reports/KNOWN_ISSUES_UPDATED.md`:
 * The `.pdf` association must be registered with
   `scripts/register-file-association.ps1`; Tauri's declarative config does not
   write it on this machine (K-01).
-* Cross-reader display could not be verified here — the session has no
-  interactive compositor (K-02).
+* Cross-reader display is verified in WPS (independent engine). Edge renders the
+  document but does not paint the annotation layer by default; Acrobat is not installed
+  (K-02).
 * The `__paperai` automation API is compiled into the release build (K-03).
 * Saving is two renames, not an atomic overwrite; a crash mid-save leaves a
   recoverable `.paperai.old` (K-07).

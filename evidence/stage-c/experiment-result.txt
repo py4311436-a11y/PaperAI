@@ -1,0 +1,8 @@
+﻿experimental installer exit=0
+--- registry after ---
+Apps\PaperAI.exe: False
+OpenWithProgids: False
+.pdf default: 'PDF Document'
+PDF Document key: True
+--- any PaperAI key under Classes ---
+PDF Document

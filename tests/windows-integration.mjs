@@ -58,6 +58,30 @@ function listProcesses(name) {
   return r.ok && r.out ? r.out.split(/\r?\n/).filter(Boolean) : [];
 }
 
+/**
+ * Wait until the installer's file-association writes have landed.
+ * `setup.exe /S` spawns a child and returns immediately, so a fixed sleep races
+ * the actual registry writes — this is what made C2.1 flaky.
+ */
+async function waitForAssociation(timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const out = ps(
+      `$hits = @(); ` +
+        `foreach ($root in @('HKCU:\\SOFTWARE\\Classes','HKLM:\\SOFTWARE\\Classes')) { ` +
+        `  $k = Join-Path $root 'Applications\\PaperAI.exe'; ` +
+        `  if (Test-Path $k) { $hits += $k } ` +
+        `  $o = Join-Path $root '.pdf\\OpenWithProgids'; ` +
+        `  if (Test-Path $o) { $v = (Get-Item $o).Property; if ($v -contains 'PaperAI.exe') { $hits += $o + ' contains PaperAI.exe' } } ` +
+        `} ` +
+        `$hits -join ' ;; '`
+    ).out;
+    if (out) return out;
+    await sleep(1000);
+  }
+  return "";
+}
+
 async function main() {
   if (!INSTALLER || !existsSync(INSTALLER)) {
     record("C0", "NSIS 安装包存在", "BLOCKED", `未提供: ${INSTALLER}`);
@@ -76,6 +100,15 @@ async function main() {
     ps(`Get-Process -Name PaperAI -ErrorAction SilentlyContinue | Stop-Process -Force | Out-String`);
     await sleep(2500);
   }
+
+  // Uninstall any existing copy first. Re-running the installer over an
+  // existing install takes NSIS's update path, which does not re-run the
+  // install section and therefore does not re-register the file association —
+  // that made C2.1 look flaky. A clean install is what we want to verify.
+  const preUninstall = ps(
+    `$u = Join-Path $env:LOCALAPPDATA 'PaperAI\\uninstall.exe'; ` +
+    `if (Test-Path $u) { $p = Start-Process $u -ArgumentList '/S' -Wait -PassThru; 'uninstalled rc=' + $p.ExitCode } else { 'nothing installed' }`
+  ).out;
 
   const beforeProgId = ps(`(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\UserChoice' -ErrorAction SilentlyContinue).ProgId`).out;
 
@@ -125,27 +158,18 @@ async function main() {
       `} ` +
       `$hits -join ' ;; '`
   );
-  // Tauri's declarative `bundle.fileAssociations` produced NO registry entry
-  // under NSIS `currentUser` (verified). So we additionally run the companion
-  // registration script and verify the end state that matters: PaperAI appears
-  // as a .pdf candidate while the user's default reader is untouched.
-  const autoReg = assoc.out;
-  const manual = ps(
-    `& "D:\\AIreader\\PaperAI-PoC\\scripts\\register-file-association.ps1" | Out-String`
-  );
-  const after = ps(
-    `$hits = @(); ` +
-      `foreach ($root in @('HKCU:\\SOFTWARE\\Classes','HKLM:\\SOFTWARE\\Classes')) { ` +
-      `  $k = Join-Path $root 'Applications\\PaperAI.exe'; ` +
-      `  if (Test-Path $k) { $hits += $k } ` +
-      `  $o = Join-Path $root '.pdf\\OpenWithProgids'; ` +
-      `  if (Test-Path $o) { $v = (Get-Item $o).Property; if ($v -contains 'PaperAI.exe') { $hits += $o + ' contains PaperAI.exe' } } ` +
-      `} ` +
-      `$hits -join ' ;; '`
-  );
-  record("C2.1", ".pdf 关联注册（作为候选项）", after.out ? "PASS" : "FAIL",
-    `自动注册(bundle.fileAssociations)=${autoReg || "无"}; 脚本注册脚本输出=${(manual.out || manual.err || "").trim().slice(0, 160)}\n            注册结果=${after.out || "未注册"}`);
-
+  // The declarative `bundle.fileAssociations` IS honoured by the generated
+  // installer.nsi (it calls APP_ASSOCIATE), but that macro writes through
+  // SHELL_CONTEXT, which the generated script never initialises during install.
+  // src-tauri/installer-hooks.nsh fixes that via NSIS_HOOK_PREINSTALL, so the
+  // installer itself now registers us. Verify the registry directly instead of
+  // running any helper script.
+  const after = await waitForAssociation();
+  const defaultProgId = ps(
+    `(Get-ItemProperty 'HKCU:\SOFTWARE\Classes\.pdf' -ErrorAction SilentlyContinue).'(default)'`
+  ).out;
+  record("C2.1", ".pdf 关联由安装器原生注册（候选项）", after ? "PASS" : "FAIL",
+    `注册结果=${after || "未注册"}; .pdf 默认 ProgId="${defaultProgId}"（安装器不得抢占默认）`);
   const afterProgId = ps(`(Get-ItemProperty 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.pdf\\UserChoice' -ErrorAction SilentlyContinue).ProgId`).out;
   record(
     "C2.2",
@@ -239,17 +263,17 @@ async function main() {
       finalProgId === beforeProgId ? "PASS" : "FAIL",
       `原始=${beforeProgId || "(none)"} 卸载后=${finalProgId || "(none)"}`
     );
-    const leftoverAssoc = ps(
-      `[bool](Test-Path 'HKCU:\\SOFTWARE\\Classes\\Applications\\PaperAI.exe')`
-    ).out;
-    if (leftoverAssoc === "True") {
-      ps(`& "D:\\AIreader\\PaperAI-PoC\\scripts\\register-file-association.ps1" -Unregister | Out-String`);
-    }
+    // With the installer now registering the association itself, the
+    // uninstaller must clean it up too — no helper script involved.
     const afterClean = ps(
       `[bool](Test-Path 'HKCU:\\SOFTWARE\\Classes\\Applications\\PaperAI.exe')`
     ).out;
-    record("C5.5", "PaperAI 关联项清理", afterClean === "False" ? "PASS" : "FAIL",
-      `卸载器本身不清理本项目脚本注册的项（bundler 未写关联），已运行 scripts/register-file-association.ps1 -Unregister；仍存在=${afterClean}`);
+    const openWithGone = ps(
+      `$v = (Get-Item 'HKCU:\\SOFTWARE\\Classes\\.pdf\\OpenWithProgids' -ErrorAction SilentlyContinue).Property; ` +
+      `if ($v -contains 'PaperAI.exe') { 'still-listed' } else { 'removed' }`
+    ).out;
+    record("C5.5", "卸载器原生清理 PaperAI 关联项", afterClean === "False" && openWithGone === "removed" ? "PASS" : "FAIL",
+      `Applications\\PaperAI.exe 仍存在=${afterClean}; OpenWithProgids=${openWithGone}`);
   } else {
     record("C5.1", "卸载程序执行", "NOT RUN", "未找到卸载命令");
   }

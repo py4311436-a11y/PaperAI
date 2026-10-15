@@ -1,4 +1,1 @@
-output/annotated-desktop.pdf | 497510 bytes | sha256 2a99ff81e57ef4298d6402f4bebc95d63815709d10f95510563a4398422dbbde
-test-fixtures/dual/IEEE 双栏 论文 副本.pdf | 490608 bytes | sha256 e90453ad008664496bf957a600a37aded935bff5a31d0c7310570e5af2b22559
-dist/installer/PaperAI_0.2.0_x64-setup.exe | 3852257 bytes | sha256 c29f9dae30c724dcb6ac4e229f63d68d1a5163b96a4865404cd352391336be43
-D:/PaperAI-Build/target/release/PaperAI.exe | 6394368 bytes | sha256 0f880f771c74237df0602f1749aecb2b79991b0c88055491ff38534382fd505f
+dist/installer/PaperAI_0.2.0_x64-setup.exe | 11681450 bytes | sha256 3f5a840984c851603b9d87232f0f9b77312a62b88a6174133961ccdd26e69635

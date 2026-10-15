@@ -1,0 +1,5 @@
+﻿PaperAI processes: 0
+exe exists: True
+exe mtime: 10/15/2026 15:38:02
+listening 9804: 0
+any tauri CDP ports: 

@@ -1,0 +1,8 @@
+﻿session id       : 32452
+SESSIONNAME      : 
+UserInteractive  : True
+explorer window  : 
+dwm (compositor) : running (353.5 MB)
+screens          : 1
+primary bounds   : {X=0,Y=0,Width=1280,Height=720}
+OpenInputDesktop : OK (interactive input desktop present)

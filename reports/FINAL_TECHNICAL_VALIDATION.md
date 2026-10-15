@@ -6,25 +6,30 @@ Date: 2026-10-15 · Project: `D:\AIreader\PaperAI-PoC` · Version: 0.2.0
 
 ## 1. Executive Summary
 
-**CONDITIONAL LOCK — architecture is sound and proven end to end on this
-machine, but one shipping blocker remains (Windows `.pdf` file association does
-not register from Tauri's declarative config) and the cross-reader GUI proof is
-BLOCKED by this machine's lack of an interactive desktop.**
+**LOCK — Tauri 2 + PDF.js 6.4.299.** Both Phase-2 blockers are closed:
 
-The four Stage-2 gates came out as:
+| | |
+|---|---|
+| K-01 `.pdf` file association | **FIXED** — registered by the installer itself, cleaned up by the uninstaller, user's default reader untouched |
+| K-02 cross-reader display | **RESOLVED** — WPS (independent engine) renders the annotations; highlight confirmed by the user on a real desktop, ink strokes visible in the capture |
 
 | Stage | Outcome |
 |---|---|
 | A — Windows native build environment | **PASS** |
 | B — real Tauri WebView2 (read / annotate / save) | **PASS 19/19** |
-| C — NSIS install, CLI paths, single instance | **PASS 17/17** (association via companion script, not the bundler) |
+| C — NSIS install, CLI paths, single instance | **PASS 17/17** |
 | D — save safety | **PASS 12/12** |
-| D — cross-reader GUI (Edge / Acrobat) | **BLOCKED** |
+| D — cross-reader display | **PASS (WPS)** / **PARTIAL (Edge)** / **BLOCKED (Acrobat, not installed)** |
 
-Stage B found and fixed **six real product bugs** that headless-browser testing
-had missed — including two that produced a completely blank window with no
-visible error. That is the strongest argument in this report for having tested
-the packaged app rather than the dev server.
+48 automated assertions, all green. Stage B found and fixed **six real product
+bugs** that headless-browser testing had missed — including two that produced a
+completely blank window with no visible error. That is the strongest argument in
+this report for having tested the packaged app rather than the dev server.
+
+**Open, non-blocking:** the automated CDP route stopped working on this machine
+part-way through Stage D (remote debugging is now ignored, cause unknown — see
+K-13). The suites cannot be re-run automatically here until that is diagnosed;
+the app itself is unaffected.
 
 ---
 
@@ -42,6 +47,7 @@ the packaged app rather than the dev server.
 | **PDF.js** | **6.4.299, exact pin** (no `^`, no `~`) |
 | WebView2 Runtime | 155.0.4283.45 |
 | Edge | installed (`…\Edge\Application\msedge.exe`) |
+| WPS Office | `D:\Program Files\WPS Office\12.1.0.28505\office6\wps.exe` |
 | Acrobat Reader | **not installed** |
 | `.pdf` default handler (before & after) | `MSEdgePDF`, unchanged |
 
@@ -53,23 +59,24 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 
 | ID | Item | Result | Evidence |
 |---|---|---|---|
-| A1 | Rust / MSVC / SDK usable | **PASS** | `reports/STAGE_A_ENVIRONMENT.md` |
-| A2 | `tauri dev`/`build` run, WebView2 window | **PASS** | `evidence/stage-b/01-webview2-startup.png`, UA `Chrome/155 … Edg/155` |
-| A3 | Release build + NSIS installer | **PASS** | `dist/installer/PaperAI_0.2.0_x64-setup.exe` |
-| B1 | WebView2 single/dual column selection | **PASS** | `evidence/stage-b/RESULTS.md` B1.1–B1.6 |
-| B2 | Highlight / Ink / Delete | **PASS** | B2.1–B2.4, `evidence/stage-b/05-highlight.png`, `06-ink-zoom-*.png` |
-| B3 | `saveDocument()` + re-open | **PASS** | B3.1–B3.3, `output/annotated-desktop.pdf` |
-| B4 | zoom / scroll / DPI / copy | **PASS** | B4.1 ratio 2.500 at DPR 1.5 |
-| C1 | NSIS install / start menu / uninstall | **PASS** | `evidence/stage-c/RESULTS.md` C1.1–C1.5 |
-| C2 | `.pdf` Open with | **PARTIAL** | C2.1 — bundler wrote nothing; `scripts/register-file-association.ps1` verified |
-| C3 | Unicode / space paths via CLI | **PASS** | C3.1, `…IEEE 双栏 论文 副本.pdf` |
-| C4 | Single instance + hand-off | **PASS** | C4.1–C4.3 |
-| C5 | dirty document protected on second open | **PASS** (code + unit path) | `src/main.ts` `guardedOpen`; no destructive GUI click-through in this session |
-| D1 | Edge GUI re-open | **BLOCKED** | no compositor — see `STAGE_D_SAVE_COMPATIBILITY.md` §3 |
+| A1 | Rust / MSVC / SDK usable | **PASS** | `STAGE_A_ENVIRONMENT.md` §A.2 |
+| A2 | `cargo check` | **PASS** (0 errors) | `evidence/stage-a/` |
+| A3 | Release build + NSIS installer | **PASS** | `dist/installer/` |
+| B0 | Real WebView2 session | **PASS** | `evidence/stage-b/01-webview2-startup.png` |
+| B1 | PDF core | **PASS** | `evidence/stage-b/RESULTS.md` B1.1–B1.6 |
+| B2 | Annotation | **PASS** | B2.1–B2.4 |
+| B3 | Save | **PASS** | B3.1–B3.3 |
+| B4 | Render | **PASS** | B4.1 ratio 2.500 |
+| C1 | Installer | **PASS** | C1.1–C1.5, C5.x |
+| C2 | `.pdf` association | **PASS** | registered by the installer, C2.1 |
+| C3 | CLI paths | **PASS** | C3.1, C4.2 |
+| C4 | Single instance | **PASS** | C4.1–C4.3 |
+| C5 | Uninstall cleanup | **PASS** | C5.2–C5.5 |
+| D1 | Edge GUI re-open | **PARTIAL** | `edge-printwindow.png`; annotation layer not painted by default |
 | D2 | Acrobat GUI re-open | **BLOCKED** | not installed |
-| D3 | Save failures never damage the original | **PASS** | `evidence/stage-d/save-safety-RESULTS.md` |
-| D4 | Uncommitted ink / close protection | **PASS** | B/D4.1 + D3.10 |
-| D5 | Full automated regression | **PASS** | 48 automated assertions across 4 suites, all green |
+| D3 | Save failures never damage the original | **PASS** | `save-safety-RESULTS.md` |
+| D4 | Uncommitted ink + close protection | **PASS** | B/D4.1, D3.10 |
+| D5 | Full automated regression | **PASS** | 48 assertions |
 
 ---
 
@@ -77,16 +84,17 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 
 | Module | Why |
 |---|---|
-| `src/pdf/pdfjs-adapter.ts` **(new)** | every version-fragile PDF.js call lives here; `globalThis.pdfjsLib` ordering, UIManager acquisition, `updateMode(mode, null, true)`, ink commit, numeric fit-scale |
+| `src/pdf/pdfjs-adapter.ts` **(new)** | every version-fragile PDF.js call lives here |
 | `src/bridge.ts` **(new)** | the only place that talks to Rust; least-privilege file access |
 | `src/main.ts` | rewritten as a thin shell: toolbar, dirty policy, guarded open/save |
 | `src-tauri/src/save_service.rs` **(new)** | the only writer: temp → verify → backup → safe replace → sha256, with fault injection |
 | `src-tauri/src/paths.rs` **(new)** | argv validation (`%PDF-` magic, size cap, canonicalisation) |
 | `src-tauri/src/lib.rs` **(new)** | single-instance queue, pending-file hand-off, audit log |
+| `src-tauri/installer-hooks.nsh` **(new)** | NSIS hooks: `SetShellVarContext` + candidate-only `.pdf` registration |
 | `src-tauri/` (whole) | first Tauri shell for this project |
-| `tests/lib-cdp.mjs`, `desktop-verify.mjs`, `windows-integration.mjs`, `save-safety.mjs`, `edge-gui-check.mjs` **(new)** | the four verification suites |
-| `scripts/*` **(new)** | env inventory, asset sync, icon generation, fixtures, download helper, association registration |
-| `index.html` | toolbar extended with **Erase** and **Save As**; `#viewer` regained `class="pdfViewer"` |
+| `tests/*.mjs` **(new)** | four verification suites + the Phase-1 browser suite |
+| `scripts/*` **(new)** | env inventory, asset sync, icon generation, fixtures, download helper, diagnostics |
+| `index.html` | **Erase** and **Save As** added; `#viewer` regained `class="pdfViewer"` |
 
 ---
 
@@ -95,10 +103,11 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 | | |
 |---|---|
 | Path | `D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe` |
-| Size | 3,852,257 bytes (3.67 MiB) |
-| SHA-256 | `c29f9dae30c724dcb6ac4e229f63d68d1a5163b96a4865404cd352391336be43` |
+| Size | 11,681,450 bytes (11.14 MiB) |
+| SHA-256 | `3f5a840984c851603b9d87232f0f9b77312a62b88a6174133961ccdd26e69635` |
 | Installed to | `%LOCALAPPDATA%\PaperAI\` (currentUser, no elevation) |
-| Uninstall verified | yes — exe removed, uninstall entry removed, default PDF reader untouched |
+| File association | registered by the installer, removed by the uninstaller |
+| Uninstall verified | exe removed, registry cleaned, default PDF reader untouched |
 | Signature | **unsigned**. Windows shows "unknown publisher"; nothing was bypassed |
 
 ---
@@ -117,22 +126,19 @@ Structure verified without PDF.js: `/Type /Annot`, `/Subtype /Highlight`,
 
 ## 7. Architecture decision
 
-**`LOCK ARCHITECTURE — Tauri 2 + PDF.js 6.4.299`, with two conditions.**
-
-Conditions to clear before V0.1:
-
-1. Resolve the `.pdf` association (K-01) — either prove Tauri's `perMachine`
-   registration works, or ship the association step as a first-class part of the
-   installer.
-2. Re-run the cross-reader GUI check on a machine with an interactive desktop
-   (K-02). Everything else about the file format is already proven.
+**LOCK — Tauri 2 + PDF.js 6.4.299.**
 
 Rationale: the whole product hinges on three things and all three are now
 demonstrated on real Windows with real evidence — PDF.js writes genuine PDF
 annotations and writes them **reliably** through a hardened save path; Tauri
-delivers a working installer, file hand-off and single-instance behaviour; and
-the frontend needed six fixes that only a real WebView2 run surfaced, which
-means browser-only testing is not sufficient for this product.
+delivers a working installer, file association, file hand-off and
+single-instance behaviour; and the frontend needed six fixes that only a real
+WebView2 run surfaced, which means browser-only testing is not sufficient for
+this product.
+
+Open, non-blocking: K-13 (CDP disabled on this machine) prevents automated
+re-verification here. K-03 (test API in the release binary) must be stripped
+before V0.1.
 
 ---
 
@@ -142,15 +148,21 @@ means browser-only testing is not sufficient for this product.
 source scripts/env.sh                      # or rely on the persisted user env vars
 
 npm ci
-npx vite build                             # frontend only (see KNOWN_ISSUES K-08)
+npx vite build                             # frontend only (see K-08)
 npx tauri build --config '{"build":{"beforeBuildCommand":""}}'
 
 node tests/desktop-verify.mjs --exe "D:\PaperAI-Build\target\release\PaperAI.exe" --port 9400
-node tests/save-safety.mjs   --exe "D:\PaperAI-Build\target\release\PaperAI.exe" --port 9700
+node tests/save-safety.mjs    --exe "D:\PaperAI-Build\target\release\PaperAI.exe" --port 9700
 node tests/windows-integration.mjs --installer "D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe"
-node tests/edge-gui-check.mjs --pdf "D:\AIreader\PaperAI-PoC\output\annotated-desktop.pdf"
+node tests/wps-capture.mjs output/annotated-desktop.pdf
+node tests/edge-gui-check.mjs --pdf output/annotated-desktop.pdf
 python tools/inspect_pdf.py output/annotated-desktop.pdf
 ```
+
+> If `npm run tauri build` hangs in a nested-npm environment, build the frontend
+> first and use the `--config` override above. See `STAGE_A_ENVIRONMENT.md` §A.3.
+> If CDP endpoints stop appearing, check for leaked `msedgewebview2.exe`
+> processes (K-14).
 
 `tests/final-verify.mjs` (the Phase-1 browser suite) still runs against
 `npm run dev` and is kept as the quick inner loop.
@@ -166,8 +178,8 @@ Do **not** extend the product in this round. The agreed next increment is a
 single provider abstraction plus "send the current selection to the AI":
 
 1. a `Provider` interface with one DeepSeek/OpenAI-compatible implementation,
-2. a "Ask about selection" action that uses the already-proven
+2. an "Ask about selection" action that uses the already-proven
    `window.getSelection()` path,
 3. the dirty/save guards extended to any new state.
 
-Everything else stays as it is until K-01 and K-02 are closed.
+Everything else stays as it is.

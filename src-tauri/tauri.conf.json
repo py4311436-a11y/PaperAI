@@ -44,16 +44,7 @@
     "shortDescription": "Read · Annotate · Ask",
     "longDescription": "PaperAI — a minimal Windows PDF reader for academic papers, with real PDF annotations (highlight / ink) written back into the file.",
     "copyright": "PaperAI",
-    "fileAssociations": [
-      {
-        "ext": [
-          "pdf"
-        ],
-        "name": "PDF Document",
-        "description": "Portable Document Format",
-        "role": "Viewer"
-      }
-    ],
+    "fileAssociations": null,
     "windows": {
       "nsis": {
         "installMode": "currentUser",
@@ -62,7 +53,8 @@
           "English"
         ],
         "displayLanguageSelector": true,
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer-hooks.nsh"
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

@@ -1,0 +1,5 @@
+﻿before: 'PDF Document'
+操作成功完成。
+
+after: ''
+UserChoice ProgId: MSEdgePDF

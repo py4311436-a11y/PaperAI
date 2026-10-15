@@ -1,0 +1,3 @@
+﻿msedgewebview2 leftover: 18
+after cleanup: 12
+user msedge untouched: 23

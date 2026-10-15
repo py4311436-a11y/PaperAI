@@ -1,0 +1,2 @@
+﻿HKCU:\SOFTWARE\Classes\KWPS.PDF.9\shell\open\command => "D:\Program Files\WPS Office\12.1.0.28505\office6\wps.exe" /prometheus /pdf "%1"
+shortcut: WPS Office.lnk

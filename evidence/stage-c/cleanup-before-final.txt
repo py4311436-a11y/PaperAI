@@ -1,0 +1,6 @@
+﻿uninstall exit=0
+.pdf default before: 'PDF Document'
+cleared hijacked .pdf default value
+.pdf default after: 'PDF Document'
+UserChoice ProgId: MSEdgePDF
+PaperAI.exe still installed: False

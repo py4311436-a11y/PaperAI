@@ -1,0 +1,3 @@
+﻿msedgewebview2 before: 24
+msedgewebview2 after: 14
+user msedge still alive: 24
