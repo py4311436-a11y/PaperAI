@@ -9,10 +9,20 @@ release/
 .DS_Store
 public/cmaps/
 public/standard_fonts/
-evidence/stage-d/edge-profile/
-evidence/stage-d/edge-gdi-profile/
-evidence/stage-d/edge-serve-profile/
-evidence/stage-d/edge-pw-profile/
-evidence/stage-d/edge-gdi2-profile/
-evidence/stage-b/edge-ctrl-profile/
-evidence/stage-b/edge-profile/
+
+# Browser profiles. NEVER commit these.
+#
+# The CDP experiments used `--user-data-dir` inside evidence/, and those
+# directories accumulated real profile data: Cookies, History, Web Data and a
+# `Login Data` holding 267 saved-credential rows, plus the `Local State` file
+# with the key material that protects them. 1477 such files were committed once.
+# A fresh Edge profile has zero rows in all of those, so this was never filler.
+#
+# The catch-all is deliberate: a specific list is what let edge-serve-profile
+# slip through while edge-ctrl-profile was covered.
+*-profile/
+**/*-profile/
+Login Data
+Cookies
+Web Data
+Local State

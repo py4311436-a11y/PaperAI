@@ -23,7 +23,8 @@
     "test:ui-overlay": "node tests/overlay-visibility.mjs",
     "test:all": "npm run test:ai && npm run test:ui-overlay",
     "release:collect": "node scripts/collect-release.mjs",
-    "size:report": "node scripts/size-report.mjs"
+    "size:report": "node scripts/size-report.mjs",
+    "verify:no-profiles": "node scripts/verify-no-profile-data.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3",

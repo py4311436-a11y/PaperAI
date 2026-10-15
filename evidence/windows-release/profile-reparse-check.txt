@@ -1,0 +1,24 @@
+﻿=== 这些目录是否为重解析点（junction / symlink）===
+  edge-ctrl-profile: Attributes=Directory  LinkType=  Target=
+  edge-serve-profile: Attributes=Directory  LinkType=  Target=
+  edge-gdi2-profile: Attributes=Directory  LinkType=  Target=
+  edge-profile: Attributes=Directory  LinkType=  Target=
+  edge-pw-profile: Attributes=Directory  LinkType=  Target=
+
+=== 真实 Edge 用户数据目录在哪 ===
+  C:\Users\py252\AppData\Local\Microsoft\Edge\User Data : True
+  D:\Microsoft\Edge\User Data : False
+  D:\Edge\User Data : False
+
+默认 profile 的 Login Data 存在: False
+
+=== 搜索磁盘上的 Edge 'User Data\Default\Login Data'（限 D 盘顶层与 LocalAppData）===
+  C:\Users\py252\AppData\Local\com.ccswitch.desktop\EBWebView\Default\Login Data
+  C:\Users\py252\AppData\Local\com.nousresearch.hermes.setup\EBWebView\Default\Login Data
+  C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView\Default\Login Data
+  C:\Users\py252\AppData\Local\Doubao\User Data\Default\Login Data
+  C:\Users\py252\AppData\Local\EBWebView\Default\Login Data
+  C:\Users\py252\AppData\Local\flutter_webview_windows\AweSun\EBWebView\Default\Login Data
+  D:\PaperAI-Build\edge-dbg-a\Default\Login Data
+  D:\PaperAI-Build\edge-dbg-c\Default\Login Data
+  D:\Typedown\Typedown.exe.WebView2\EBWebView\Default\Login Data

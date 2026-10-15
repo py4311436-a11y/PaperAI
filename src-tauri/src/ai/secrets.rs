@@ -203,3 +203,223 @@ pub fn redact(s: &str) -> String {
     let head: String = t.chars().take(3).collect();
     format!("{head}***（已隐藏，共 {} 字符）", t.chars().count())
 }
+
+// ---------------------------------------------------------------------------
+// "Is it safe to hand this build to someone else?"
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod sharing_audit {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri has a parent")
+            .to_path_buf()
+    }
+
+    /// Every file a recipient could plausibly end up with.
+    ///
+    /// Deliberately includes the INSTALLED binary and the app's own log: a log
+    /// is the classic accidental leak, and users attach logs to bug reports.
+    fn artifacts_to_scan() -> Vec<PathBuf> {
+        let root = repo_root();
+        let mut out = Vec::new();
+
+        let mut push_dir = |dir: &Path, out: &mut Vec<PathBuf>| {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_file() {
+                    out.push(p);
+                } else if p.is_dir() {
+                    if let Ok(inner) = std::fs::read_dir(&p) {
+                        for e2 in inner.flatten() {
+                            if e2.path().is_file() {
+                                out.push(e2.path());
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        push_dir(&root.join("release"), &mut out);
+        push_dir(&root.join("dist"), &mut out);
+        push_dir(&root.join("dist").join("assets"), &mut out);
+
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let app = Path::new(&local).join("PaperAI");
+            push_dir(&app, &mut out);
+            // A very large log is still worth scanning; cap defensively.
+            out.retain(|p| p.metadata().map(|m| m.len() < 512 * 1024 * 1024).unwrap_or(false));
+            // The installed copy lives elsewhere (NSIS remembers the first
+            // install directory), so ask the registry-independent place too.
+            let installed = Path::new("D://Program Files//PaperAI").join("PaperAI.exe");
+            if installed.is_file() {
+                out.push(installed);
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Profile ids from `ai-profiles.json`. That file holds no secret — only
+    /// ids and endpoints — so reading it here leaks nothing.
+    fn profile_ids() -> Vec<String> {
+        let Ok(local) = std::env::var("LOCALAPPDATA") else {
+            return Vec::new();
+        };
+        let p = Path::new(&local).join("PaperAI").join("ai-profiles.json");
+        let Ok(text) = std::fs::read_to_string(&p) else {
+            return Vec::new();
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            return Vec::new();
+        };
+        v["profiles"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| {
+                        p["credential_id"]
+                            .as_str()
+                            .or_else(|| p["id"].as_str())
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        if needle.is_empty() || needle.len() > haystack.len() {
+            return false;
+        }
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    /// Scan `files` for `keys`. Returns (files scanned, bytes scanned, leaks).
+    ///
+    /// Split out from the audit below so a control test can prove the scanner
+    /// actually finds a needle it is handed. Without that control, "PASS" from
+    /// a scanner that silently examines nothing is indistinguishable from a
+    /// clean result.
+    fn scan_for(files: &[PathBuf], keys: &[(String, String)]) -> (usize, u64, Vec<String>) {
+        let mut leaks = Vec::new();
+        let mut scanned = 0usize;
+        let mut bytes_total: u64 = 0;
+        for f in files {
+            let Ok(bytes) = std::fs::read(f) else { continue };
+            scanned += 1;
+            bytes_total += bytes.len() as u64;
+            for (id, k) in keys {
+                if contains(&bytes, k.as_bytes()) {
+                    leaks.push(format!("{} in {}", id, f.display()));
+                }
+            }
+        }
+        (scanned, bytes_total, leaks)
+    }
+
+    /// Negative control: the scanner must find a secret that IS present.
+    /// A detector that cannot fail is not evidence.
+    #[test]
+    fn the_scanner_detects_a_planted_key() {
+        let secret = "sk-plAnted-control-value-0123456789";
+        let dir = std::env::temp_dir().join("paperai-secret-audit-control");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let planted = dir.join("planted.bin");
+        std::fs::write(&planted, format!("junk before\n{secret}\njunk after")).expect("write");
+
+        let keys = vec![("control".to_string(), secret.to_string())];
+        let (n, bytes, leaks) = scan_for(std::slice::from_ref(&planted), &keys);
+
+        assert_eq!(n, 1, "scanner did not read the file it was given");
+        assert!(bytes > 0, "scanner read 0 bytes");
+        assert_eq!(
+            leaks.len(),
+            1,
+            "the scanner failed to find a value it was explicitly handed — \
+             any PASS it reports would be meaningless"
+        );
+
+        let _ = std::fs::remove_file(&planted);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// **Run this before handing a build to anyone.**
+    ///
+    ///     cd src-tauri
+    ///     cargo test --lib -- --ignored --nocapture shipped_artifacts
+    ///
+    /// It reads the *real* stored credential and searches every file a
+    /// recipient could receive for those exact bytes. It never prints the key
+    /// (only its length and where it lives), and it never writes it anywhere.
+    ///
+    /// Ignored by default: it needs a genuine credential and a built installer,
+    /// neither of which exists in a clean checkout.
+    #[test]
+    #[ignore = "manual audit; needs a stored credential and a built installer"]
+    fn shipped_artifacts_do_not_contain_a_stored_key() {
+        let ids = profile_ids();
+        let mut keys: Vec<(String, String)> = Vec::new();
+        for id in &ids {
+            if let Ok(k) = read_secret(id) {
+                keys.push((id.clone(), k));
+            }
+        }
+
+        if keys.is_empty() {
+            eprintln!(
+                "SKIPPED: no readable credential for {:?}. Nothing to audit.",
+                ids
+            );
+            return;
+        }
+        for (id, k) in &keys {
+            eprintln!(
+                "auditing {} secret(s); {} -> {} bytes, target {}",
+                keys.len(),
+                id,
+                k.len(),
+                credential_name(id)
+            );
+        }
+
+        let files = artifacts_to_scan();
+        assert!(!files.is_empty(), "found nothing to scan — wrong working dir?");
+
+        // Show the biggest targets so the coverage is visible, not just asserted.
+        let mut by_size: Vec<(u64, String)> = files
+            .iter()
+            .filter_map(|f| f.metadata().ok().map(|m| (m.len(), f.display().to_string())))
+            .collect();
+        by_size.sort_by(|a, b| b.0.cmp(&a.0));
+        eprintln!("\nlargest files in the scan set:");
+        for (size, path) in by_size.iter().take(5) {
+            eprintln!("  {:>12}  {}", size, path);
+        }
+
+        let (scanned, bytes_total, leaks) = scan_for(&files, &keys);
+        eprintln!(
+            "\nscanned {} file(s), {} bytes total ({:.1} MiB)",
+            scanned,
+            bytes_total,
+            bytes_total as f64 / 1024.0 / 1024.0
+        );
+
+        assert!(
+            leaks.is_empty(),
+            "A STORED KEY APPEARS IN A SHIPPED FILE — do not distribute:\n{}",
+            leaks.join("\n")
+        );
+        eprintln!(
+            "PASS: none of the {scanned} file(s) contain any stored key.\n  \
+             (the key itself was never printed and never written to disk)"
+        );
+    }
+}
