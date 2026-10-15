@@ -85,6 +85,20 @@ expects to reopen a paper and find yesterday's questions will be surprised.
 
 ## P2
 
+### A-11 — A frontend-only rebuild used to delete the shipped installer
+
+`vite build` empties `dist/`, and the deliverable lives in `dist/installer/`.
+Running `npm run build:release` therefore removed
+`PaperAI_0.3.0_x64-setup.exe` with no error at all.
+
+* Fixed: `scripts/build.mjs` moves `dist/installer` to `.installer-stash/`
+  (outside `dist/`) before bundling and restores it afterwards, reporting how
+  many files it preserved. A first attempt stashed inside `dist/.installer-stash`
+  and Vite deleted that too.
+* Why it earns an entry despite being fixed: a build step that silently deletes
+  an artefact is more dangerous than one that fails, because failure is noticed
+  and deletion is not.
+
 ### A-07 — Model field starts empty for a custom provider
 
 Adding "OpenAI-compatible Custom" pre-fills `https://` and an empty model, so
