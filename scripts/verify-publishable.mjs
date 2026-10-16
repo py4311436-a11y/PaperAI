@@ -146,11 +146,16 @@ if (!identityHits) ok("无本机身份信息", `${textFiles.length} 个文本文
  * infringement, so a line that is mostly a citation is not what this looks for:
  * it looks for long verbatim runs, which is what extraction produces.
  */
+/**
+ * Signatures of the documents these fixtures were originally built from.
+ *
+ * Titles only, deliberately. A title is a citation and citing one is normal
+ * academic practice; the author names and affiliations that were also extracted
+ * into `test-artifacts/*.json` are personal data, and an audit whose job is to
+ * keep that out of the repository should not carry it in its own source.
+ */
 const SOURCE_PHRASES = [
   "Bayesian Machine Learning",
-  "Sachin Bhat",
-  "Sourabh Kulkarni",
-  "Csaba Andras Moritz",
   "Junction Temperature Extraction Based on Device Structural",
   "Benchmarking Optimization Algorithms for BSIM-CMG",
 ];
