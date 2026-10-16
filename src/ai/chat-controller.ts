@@ -12,7 +12,15 @@
  * never be stuck showing "generating".
  */
 
-import type { ChatMessage, ChatPhase, ChatTurn, ContextMode, ContextStats } from "./types";
+import type {
+  ChatMessage,
+  ChatPhase,
+  ChatTurn,
+  ContentPart,
+  ContextMode,
+  ContextStats,
+  ImageAttachment,
+} from "./types";
 
 export interface ChatControllerDeps {
   /** Send a request and feed events back through `onEvent`. */
@@ -159,6 +167,8 @@ export class ChatController {
     messages: ChatMessage[];
     contextLabel: string;
     stats: ContextStats;
+    /** Screenshots sent with this question, kept for the transcript. */
+    attachments?: ImageAttachment[];
   }): Promise<string | null> {
     const s = this.session();
     if (!s) return null;
@@ -167,12 +177,16 @@ export class ChatController {
     if (!profileId) return null;
 
     const now = this.deps.now ?? Date.now;
+    const attachments = opts.attachments ?? [];
     const userTurn: ChatTurn = {
       id: this.deps.newId(),
       role: "user",
       content: opts.question,
       phase: "completed",
       contextLabel: `${opts.contextLabel} · ${describeStats(opts.stats)}`,
+      // Shown in the transcript because a question whose only subject is a
+      // figure is unreadable later without the figure.
+      attachments: attachments.length ? attachments : undefined,
       createdAt: now(),
     };
     const assistantTurn: ChatTurn = {
@@ -309,23 +323,53 @@ export class ChatController {
       const t = s.turns[i];
       if (t.role !== "assistant" || t.phase !== "completed" || !t.content.trim()) continue;
       const prev = s.turns[i - 1];
-      if (prev?.role === "user") out.push({ role: "user", content: prev.content });
+      if (prev?.role === "user") {
+        out.push({
+          role: "user",
+          content: prev.attachments?.length
+            ? questionWithImages(prev.content, prev.attachments)
+            : prev.content,
+        });
+      }
       out.push({ role: "assistant", content: t.content });
     }
     return out.slice(-limit);
   }
 }
 
+/**
+ * Rebuild a past question's content, images included.
+ *
+ * The transcript shows the question text and the thumbnails separately, but the
+ * wire format needs them together. Dropping the images here would leave the
+ * model answering follow-ups about a figure it can no longer see — and the user
+ * with no way to tell why the answers stopped making sense.
+ */
+function questionWithImages(
+  question: string,
+  attachments: ImageAttachment[]
+): ChatMessage["content"] {
+  const parts: ContentPart[] = [{ type: "text", text: question }];
+  for (const a of attachments) {
+    parts.push({ type: "image_url", image_url: { url: a.url } });
+  }
+  return parts;
+}
+
 function describeStats(s: ContextStats): string {
-  if (!s.chars) return "无文献内容";
   const base = `${s.chars} 字 / 约 ${s.approx_tokens} tokens`;
+  // Images are counted, never folded into the token estimate: their cost is set
+  // by the provider's per-image cap, not by anything measurable locally, so a
+  // number here would look authoritative and be wrong.
+  const images = s.images ? ` · ${s.images} 张截图` : "";
+  if (!s.chars && !s.images) return "无文献内容";
   // Say so when the document did not fit. Without this the transcript claims a
   // full-paper question was answered from the full paper.
   if (s.truncated && s.pages_sent.length && s.pages_total) {
     const last = s.pages_sent[s.pages_sent.length - 1];
-    return `${base} · 仅第 ${s.pages_sent[0]}–${last} 页 / 共 ${s.pages_total} 页`;
+    return `${base}${images} · 仅第 ${s.pages_sent[0]}–${last} 页 / 共 ${s.pages_total} 页`;
   }
-  return base;
+  return base + images;
 }
 
 /** Tauri rejects with a plain string or `{code,message}`; normalise both. */

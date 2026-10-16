@@ -207,6 +207,60 @@ and the right behaviour.
 
 ---
 
+### A-23 — 0.6.0: multimodal support and region screenshots
+
+Requested after A-22, with the screenshot feature as the stated next step.
+
+**Protocol.** `content` became "a string, or an array of blocks". The shape is
+untagged on both sides, so a text-only message still serialises as a bare JSON
+string — which is what keeps A-22's prefix cache working. The collapse is
+enforced in Rust (`content_value`) rather than trusted to the caller: no images
+means the content is text, and text goes out as a string. A caller that builds
+the document as a one-element block list would otherwise turn every turn into a
+cache miss with no symptom anywhere.
+
+**Where images go.** In the question turn, never in the document turn. An image
+in the document message would make the prefix diverge on every question. The
+question turn already varies per turn, so it is free to change shape.
+
+**Local downscaling.** DeepSeek caps an image at a flat 384 tokens, so it
+downscales hard on its own side — a 4K screenshot pays full upload cost for
+detail the model never sees. Longest side goes to 1568 px, PNG first (line art
+and formulas; JPEG's 8×8 blocks ring exactly where the detail is), falling back
+to JPEG and then to a smaller scale only when PNG will not fit. Four rungs, then
+a refusal rather than an illegible image.
+
+**Cleartext refused.** Rust rejects `http://` image URLs. A screenshot of a
+paper is the most sensitive payload this app sends; fetching it over cleartext
+to avoid a base64 encoding is not a trade worth making. `data:` and `https:`
+only.
+
+**Injection.** Text rendered into a picture is still text. The system prompt's
+data-not-instructions rule now covers screenshots explicitly, and the question
+turn labels the image with its page so the model reads it as part of the paper
+rather than as an arbitrary picture.
+
+**Model capability.** There is no honest way to know in advance — a provider's
+catalogue returns ids and nothing else — so nothing guesses. The first image
+question to a text-only model fails with the provider's own message, that
+message is recorded against the model, and every later attempt with that model
+is warned *before* it is sent. A model that works is never warned about. DeepSeek's
+refusal is unambiguous: any model other than `deepseek-v4-flash-vision-exp`
+returns 400 "This model does not support image".
+
+**Two costs worth knowing.** An image-only message is legitimate and allowed.
+And once a conversation contains an image, that image is in the prefix of every
+later turn in it — if the provider does not cache image tokens, the rest of that
+conversation loses the cache. Screenshot questions are best started in a fresh
+conversation. DeepSeek's documentation does not say whether image tokens
+participate in prefix caching, so this is not a guarantee either way.
+
+**Overlay mount point.** The selection overlay is mounted on `#viewerWrap`, not
+`#viewerContainer`. The container scrolls, and an `inset: 0` child of a
+scrolling box is positioned against the top of the *content* — it sails out of
+view the moment the user scrolls. The overlay returns client coordinates so the
+caller never has to know which element it was mounted on.
+
 ### A-22 — FIXED in 0.5.3: the document was re-sent at full price on every question
 
 Reported 2026-10-16: "就算是整篇模式也不能每次都上传吧，上传一次大模型应该就有记忆了吧".

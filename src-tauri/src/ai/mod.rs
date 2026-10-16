@@ -258,7 +258,9 @@ pub async fn ai_start_chat(
     if messages.is_empty() {
         return Err(AppError::new(codes::AI_BAD_CONFIG, "消息不能为空"));
     }
-    if messages.iter().all(|m| m.content.trim().is_empty()) {
+    // An image-only message is legitimate — "what is in this figure" with no
+    // other words — so emptiness has to consider images, not just text.
+    if messages.iter().all(|m| m.content.is_empty()) {
         return Err(AppError::new(codes::AI_BAD_CONFIG, "消息内容不能为空"));
     }
 

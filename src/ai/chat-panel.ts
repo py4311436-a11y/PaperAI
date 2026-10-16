@@ -16,17 +16,19 @@ import type {
   ChatPhase,
   ChatTurn,
   ContextMode,
+  ImageAttachment,
   MemoryFile,
   ModelOption,
   ProfileStatus,
 } from "./types";
+import { describeChars } from "./image-capture.js";
 import { renderMarkdown } from "./markdown-renderer.js";
 // The explicit `.js` is deliberate: Vite resolves either form, but the Node
 // based unit suite imports this module's compiled output directly, and Node's
 // ESM loader requires a real file extension. Do not "clean" it back.
 
 export interface ChatPanelDeps {
-  onSend: (question: string) => void;
+  onSend: (question: string, attachments: ImageAttachment[]) => void;
   onStop: () => void;
   onNewConversation: () => void;
   onContextModeChange: (mode: ContextMode) => void;
@@ -39,6 +41,8 @@ export interface ChatPanelDeps {
   onSelectModel: (profileId: string, model: string) => void;
   /** Build (or rebuild) this document's reading memory. */
   onGenerateMemory: () => void;
+  /** Arm region selection over the PDF viewer. */
+  onScreenshot: () => void;
 }
 
 const MODE_LABELS: Record<ContextMode, string> = {
@@ -72,6 +76,18 @@ export class ChatPanel {
   private composerBar: HTMLElement;
   private memoryState!: HTMLElement;
   private memoryBtn!: HTMLButtonElement;
+  /**
+   * Screenshots waiting to go out with the next question.
+   *
+   * Held by the panel rather than by main so the chips and the send button see
+   * the same list — an attachment the UI shows but the request drops is worse
+   * than no attachment feature at all.
+   */
+  private attachments: ImageAttachment[] = [];
+  /** The chip row, rebuilt whenever the attachment list changes. */
+  private attachRow!: HTMLElement;
+  /** Warning about the current model and images, when there is one. */
+  private visionNote!: HTMLElement;
   /** Which turn is currently streamed as plain text. */
   private liveTurnId: string | null = null;
   /** Rendered turn nodes, keyed by turn id, reused while their content is unchanged. */
@@ -188,6 +204,20 @@ export class ChatPanel {
         this.submit();
       }
     });
+
+    // Attachments live above the textarea, between it and the transcript, so
+    // what is about to be sent is visible while the question is being typed.
+    this.attachRow = document.createElement("div");
+    this.attachRow.className = "ai-attach-row";
+    this.attachRow.hidden = true;
+
+    this.visionNote = document.createElement("div");
+    this.visionNote.className = "ai-note ai-warn";
+    this.visionNote.hidden = true;
+
+    const shotBtn = this.iconButton("截图提问", "ai-shot", () => this.deps.onScreenshot());
+    shotBtn.title = "在论文上框选一块区域，连同问题一起发送";
+
     this.composerBar = document.createElement("div");
     this.composerBar.className = "ai-composer-bar";
     this.statusEl = document.createElement("span");
@@ -204,8 +234,8 @@ export class ChatPanel {
     this.stopBtn.className = "danger";
     this.stopBtn.hidden = true;
     this.stopBtn.addEventListener("click", () => this.deps.onStop());
-    this.composerBar.append(this.statusEl, this.stopBtn, this.sendBtn);
-    composer.append(this.input, this.composerBar);
+    this.composerBar.append(shotBtn, this.statusEl, this.stopBtn, this.sendBtn);
+    composer.append(this.input, this.attachRow, this.visionNote, this.composerBar);
 
     this.root.append(header, ctxRow, memRow, this.hintEl, this.transcript, composer);
   }
@@ -222,9 +252,78 @@ export class ChatPanel {
 
   private submit(): void {
     const q = this.input.value.trim();
-    if (!q) return;
+    // An image with no words is a legitimate question — "what is in this
+    // figure" — so attachments alone are enough to send.
+    if (!q && this.attachments.length === 0) return;
+    const attachments = this.attachments;
     this.input.value = "";
-    this.deps.onSend(q);
+    this.attachments = [];
+    this.renderAttachments();
+    this.deps.onSend(q, attachments);
+  }
+
+  /** Add a captured screenshot to the pending list. */
+  addAttachment(a: ImageAttachment): void {
+    this.attachments.push(a);
+    this.renderAttachments();
+  }
+
+  /** Drop one pending screenshot. */
+  removeAttachment(id: string): void {
+    this.attachments = this.attachments.filter((a) => a.id !== id);
+    this.renderAttachments();
+  }
+
+  pendingAttachments(): ImageAttachment[] {
+    return this.attachments.slice();
+  }
+
+  /**
+   * Warn (or stop warning) that the current model may not accept images.
+   *
+   * The message comes from the provider's own refusal, recorded by
+   * `vision-support`. Nothing here guesses: a model that has never refused an
+   * image is never warned about.
+   */
+  setVisionWarning(message: string | null): void {
+    if (!message) {
+      this.visionNote.hidden = true;
+      this.visionNote.textContent = "";
+      return;
+    }
+    this.visionNote.hidden = false;
+    this.visionNote.textContent =
+      `当前模型可能不支持图片：${message}。可以换用支持视觉的模型，或移除截图后重试。`;
+  }
+
+  private renderAttachments(): void {
+    const row = this.attachRow;
+    row.replaceChildren();
+    if (this.attachments.length === 0) {
+      row.hidden = true;
+      return;
+    }
+    row.hidden = false;
+    for (const a of this.attachments) {
+      const chip = document.createElement("span");
+      chip.className = "ai-attach-chip";
+      const img = document.createElement("img");
+      img.src = a.url;
+      img.alt = a.source === "page" ? `第 ${a.page ?? "?"} 页截图` : "选中区域截图";
+      const label = document.createElement("span");
+      label.className = "ai-attach-label";
+      label.textContent =
+        `${a.source === "page" ? "整页" : "区域"} · ${a.width}×${a.height} · ${describeChars(a.chars)}` +
+        (a.page ? ` · 第 ${a.page} 页` : "");
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "ai-attach-del";
+      del.textContent = "移除";
+      del.title = "移除这张截图";
+      del.addEventListener("click", () => this.removeAttachment(a.id));
+      chip.append(img, label, del);
+      row.append(chip);
+    }
   }
 
   show(): void {
@@ -530,6 +629,24 @@ render(turns: ChatTurn[], liveId: string | null): void {
     body.className = "ai-body";
     wrap.appendChild(body);
 
+    // What the question was *about*. A question whose only subject is a figure
+    // is unreadable later without the figure, so the thumbnails stay in the
+    // transcript — and they are the same `data:` URLs that were sent, so what
+    // is shown is exactly what the model saw.
+    if (t.attachments?.length) {
+      const strip = document.createElement("div");
+      strip.className = "ai-turn-attachments";
+      for (const a of t.attachments) {
+        const img = document.createElement("img");
+        img.src = a.url;
+        img.alt = a.source === "page" ? `第 ${a.page ?? "?"} 页截图` : "选中区域截图";
+        img.title = `${a.width}×${a.height} · ${describeChars(a.chars)}` +
+          (a.page ? ` · 第 ${a.page} 页` : "");
+        strip.appendChild(img);
+      }
+      wrap.appendChild(strip);
+    }
+
     if (t.role === "assistant" && t.phase === "streaming" && t.id === this.liveTurnId) {
       // Plain text while streaming: cheap, and never half-parsed markup.
       body.classList.add("streaming");
@@ -642,7 +759,10 @@ render(turns: ChatTurn[], liveId: string | null): void {
  * least one of these fields.
  */
 function turnSignature(t: ChatTurn): string {
-  return `${t.phase}|${t.content.length}|${t.errorCode ?? ""}|${t.errorMessage ?? ""}|${t.contextLabel ?? ""}`;
+  // Attachments are part of the turn's identity: a cached node without its
+  // thumbnails is a question the user can no longer read.
+  const att = (t.attachments ?? []).map((a) => `${a.id}:${a.chars}`).join(",");
+  return `${t.phase}|${t.content.length}|${t.errorCode ?? ""}|${t.errorMessage ?? ""}|${t.contextLabel ?? ""}|${att}`;
 }
 
 /** Turn a backend error code into something a person can act on. */

@@ -201,6 +201,41 @@ for (const [test, scenario] of PLAN) {
   await mock.stop();
 }
 
+// The unit layer, run once and separately.
+//
+// Added after the multimodal work turned out to have landed entirely here: the
+// eight new protocol tests were pure unit tests, so this script — which only
+// drives the integration suite — reported a clean 29/29 while none of them had
+// ever executed. Tests that never run are worse than no tests, because they
+// read as coverage. `--lib` needs no mock, so it costs one cargo invocation.
+{
+  const { code, out } = await runCargo(["test", "--lib"]);
+  const m = out.match(/test result: ok\.\s*(\d+) passed/);
+  const libPassed = m ? Number(m[1]) : 0;
+  const libOk = code === 0 && libPassed > 0;
+  results.push({
+    test: "cargo test --lib (unit layer)",
+    scenario: "—",
+    passed: libOk,
+    skipped: false,
+    requests: 0,
+    headerNote: libOk ? `${libPassed} passed` : "unit layer failed to run",
+  });
+  console.log(
+    `[${libOk ? "PASS" : "FAIL".padEnd(8)}] cargo test --lib (unit layer)  — ${libPassed} passed`
+  );
+  if (!libOk) {
+    console.log(
+      out
+        .split(/\r?\n/)
+        .filter((l) => /panicked|assertion|expected|error\[|test result/.test(l))
+        .slice(0, 8)
+        .map((l) => "            " + l.trim())
+        .join("\n")
+    );
+  }
+}
+
 writeFileSync(
   path.join(EVIDENCE, "rust-provider-requests.json"),
   JSON.stringify(requestLog, null, 2),

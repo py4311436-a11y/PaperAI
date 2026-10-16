@@ -40,10 +40,22 @@ import {
   isSnapshotCurrent,
   type SelectionSnapshot,
 } from "./ai/selection-snapshot";
+import { captureRegion } from "./ai/image-capture";
+import {
+  ScreenshotOverlay,
+  toCanvasRect,
+  type ClientRect as ShotRect,
+} from "./ai/screenshot-overlay";
+import {
+  imageFailureFor,
+  looksLikeImageSupportError,
+  noteImageFailure,
+} from "./ai/vision-support";
 import type {
   AiProfile,
   ChatMessage,
   ContextMode,
+  ImageAttachment,
   MemoryFile,
   ModelOption,
   ProfileStatus,
@@ -147,7 +159,7 @@ function toast(msg: string, kind: "info" | "error" | "success" | "warn" = "info"
 /* ================================================================== AI ==== */
 
 const panel = new ChatPanel({
-  onSend: (q) => void askQuestion(q),
+  onSend: (q, attachments) => void askQuestion(q, attachments),
   onStop: () => void chat.cancelActive(),
   onNewConversation: () => chat.newConversation(),
   onContextModeChange: (m) => chat.setContextMode(m),
@@ -157,6 +169,7 @@ const panel = new ChatPanel({
   onSelectProfile: (id) => void chooseProfile(id),
   onSelectModel: (profileId, model) => void chooseModel(profileId, model),
   onGenerateMemory: () => void generateMemory(),
+  onScreenshot: () => armScreenshot(),
 });
 
 const chat = new ChatController({
@@ -185,6 +198,103 @@ const selectionBar = new SelectionBar(viewerWrap, {
   onTranslate: () => void askWithPreset("translate"),
   onCopy: () => undefined, // the bar copies internally and reports failures
 });
+
+/* ============================================================ screenshots == */
+
+/**
+ * Region selection over the viewer.
+ *
+ * Mounted on `viewerWrap`, NOT on `viewerContainer`: the container scrolls, and
+ * an `inset: 0` child of a scrolling box is positioned against the top of the
+ * *content* — so it sails out of view the moment the user scrolls down.
+ * `viewerWrap` is positioned and does not scroll, which makes the overlay cover
+ * exactly what is on screen.
+ *
+ * One instance, reused across armings: it builds its DOM on `arm()` and tears
+ * it down on the first selection or Escape, so there is never a second overlay
+ * swallowing clicks after the user has moved on.
+ */
+const shotOverlay = new ScreenshotOverlay(viewerWrap, (rect) => {
+  if (!rect) {
+    toast("已取消截图", "info");
+    return;
+  }
+  void captureSelectionRegion(rect);
+});
+
+/**
+ * Turn a selection rectangle into an attachment.
+ *
+ * The region is mapped into the page canvas's own pixel coordinates — which is
+ * where the zoom factor comes in. A page displayed at 50% has a canvas twice as
+ * wide as its CSS box, and capturing without that scale returns the right area
+ * at double size, i.e. half of what the user pointed at.
+ */
+async function captureSelectionRegion(rect: ShotRect): Promise<void> {
+  const page = adapter.currentPage;
+  const canvas = pageCanvas(page);
+  if (!canvas) {
+    toast("当前页还没有渲染出来，请稍候再试", "warn");
+    return;
+  }
+  // `rect` is already in client coordinates, so the canvas's own client box is
+  // the only reference needed.
+  const box = canvas.getBoundingClientRect();
+  const scale = canvas.width / Math.max(1, box.width);
+  const region = toCanvasRect(rect, box.left, box.top, scale);
+
+  try {
+    const shot = await captureRegion(canvas, region);
+    panel.addAttachment({
+      id: `shot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      url: shot.url,
+      chars: shot.chars,
+      width: shot.width,
+      height: shot.height,
+      source: "region",
+      page,
+    });
+    panel.show();
+    toast(`已截取 ${shot.width}×${shot.height}，写在问题里一起发送`, "success");
+  } catch (e) {
+    toast(e instanceof Error ? e.message : "截图失败", "warn");
+  }
+}
+
+/** The rendered canvas of a page, or null before it has painted. */
+function pageCanvas(page: number): HTMLCanvasElement | null {
+  const pg = viewerContainer.querySelector<HTMLElement>(`.page[data-page-number="${page}"]`);
+  return pg?.querySelector<HTMLCanvasElement>("canvas") ?? null;
+}
+
+/**
+ * Arm region selection.
+ *
+ * Refuses without an open document rather than arming an overlay over an empty
+ * viewer — the user would drag a rectangle around nothing and only learn
+ * afterwards.
+ */
+function armScreenshot(): void {
+  if (!adapter.numPages) {
+    toast("请先打开一篇 PDF", "warn");
+    return;
+  }
+  shotOverlay.arm();
+  panel.show();
+  toast("在论文上拖选一块区域；Esc 取消", "info");
+}
+
+/**
+ * Refresh the image-support warning for the current model.
+ *
+ * Driven by what the provider has actually said, never by a guess: a model that
+ * has never refused an image is never warned about.
+ */
+function refreshVisionWarning(): void {
+  const profile = cachedProfiles.find((p) => p.id === activeProfileId);
+  const model = profile?.model?.trim();
+  panel.setVisionWarning(model ? imageFailureFor(model) : null);
+}
 
 let activeProfileId: string | null = null;
 /**
@@ -271,6 +381,7 @@ async function chooseProfile(id: string): Promise<void> {
   activeProfileId = id;
   chat.setProfileId(id);
   panel.setProviders(cachedProfiles, id);
+  refreshVisionWarning();
   await loadModels(p);
 }
 
@@ -297,6 +408,7 @@ async function chooseModel(profileId: string, model: string): Promise<void> {
     const saved = await bridge.aiSaveProfile(profile);
     Object.assign(p, saved);
     panel.setModels(profileId, modelCatalogues.get(profileId)?.models ?? null, model);
+    refreshVisionWarning();
     diagnostics.log("info", `model switched: profile=${profileId} model=${model}`);
   } catch (e) {
     const msg = describeErr(e);
@@ -325,6 +437,7 @@ async function refreshProfileState(): Promise<void> {
     activeProfileId = chosen.id;
     chat.setProfileId(chosen.id);
     panel.setProviders(list, chosen.id);
+    refreshVisionWarning();
     void loadModels(chosen);
   } catch (e) {
     diagnostics.log("warn", `refreshProfileState: ${String(e)}`);
@@ -382,7 +495,11 @@ async function doHighlight(): Promise<void> {
 }
 
 /** Build the context and send. Shared by presets and free-form questions. */
-async function sendWithMode(question: string, mode: ContextMode): Promise<void> {
+async function sendWithMode(
+  question: string,
+  mode: ContextMode,
+  attachments: ImageAttachment[] = []
+): Promise<void> {
   if (!activeProfileId) {
     panel.show();
     toast("请先在设置中配置 AI Provider", "warn");
@@ -409,6 +526,10 @@ async function sendWithMode(question: string, mode: ContextMode): Promise<void> 
     // Reading memory is passed in so it lands in the stable prefix with the
     // document, not appended after the history where nothing can be cached.
     memory: currentMemory,
+    // Screenshots ride with the question, never with the document — see
+    // composeQuestionTurn. An image in the document message would make the
+    // prefix diverge on every question and cost the cache the whole time.
+    attachments,
   });
 
   if (mode === "current-page" || mode === "nearby-pages") {
@@ -430,8 +551,29 @@ async function sendWithMode(question: string, mode: ContextMode): Promise<void> 
     messages,
     contextLabel: memoryContext() ? `${built.label} · 含阅读笔记` : built.label,
     stats: built.stats,
+    attachments,
   });
   renderChat();
+
+  // Learn from a refusal.
+  //
+  // An image question that failed with something reading like "this model does
+  // not support images" is recorded against the model, so the *next* attempt is
+  // warned before it is sent instead of after. There is no way to know in
+  // advance which models take images — a catalogue returns ids and nothing
+  // else — so this is the only source of truth that cannot go stale or lie.
+  // A model that works is never warned about.
+  const last = chat.turns().at(-1);
+  if (turnId && attachments.length && last?.role === "assistant" && last.phase === "error") {
+    const raw = last.errorMessage ?? "";
+    if (looksLikeImageSupportError(raw)) {
+      const model = cachedProfiles.find((p) => p.id === activeProfileId)?.model ?? "";
+      if (model) {
+        noteImageFailure(model, raw);
+        refreshVisionWarning();
+      }
+    }
+  }
 
   // Auto-append for whole-document questions only: those are the ones whose
   // answers are worth keeping, and they are rare enough that a disk write per
@@ -481,8 +623,11 @@ async function askWithPreset(which: "explain" | "translate"): Promise<void> {
   await sendWithMode(PRESET_PROMPTS[which], "selection");
 }
 
-async function askQuestion(question: string): Promise<void> {
-  await sendWithMode(question, chat.contextMode());
+async function askQuestion(
+  question: string,
+  attachments: ImageAttachment[] = []
+): Promise<void> {
+  await sendWithMode(question, chat.contextMode(), attachments);
 }
 
 /* ============================================================== PDF open == */

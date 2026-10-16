@@ -25,12 +25,25 @@ use super::client::{self, classify_status, classify_transport, FIRST_TOKEN_TIMEO
 use super::{config, settings};
 use super::secrets;
 use super::stream::{SseEvent, SseParser};
-use super::types::{AiStreamEvent, ChatMessage, ConnectionTest, ModelOption};
+use super::types::{
+    AiStreamEvent, ChatMessage, ConnectionTest, Content, ContentPart, ImageUrl, ModelOption,
+};
 
 /// Total budget for the small, non-streaming helper requests (connection probe,
 /// model catalogue). A whole-exchange deadline is right for those and wrong for
 /// the chat stream — see the A-16 note in `client::build_client`.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(35);
+
+/// Ceiling on one inline image, in base64 characters.
+///
+/// DeepSeek's documented body ceiling is 48 MiB and OpenAI's per-image limit is
+/// 20 MB, so this is comfortably inside both — but it is here to turn a
+/// confusing gateway rejection into a local one we can phrase. The frontend
+/// already downscales; this is the backstop for anything that reaches Rust.
+const MAX_INLINE_IMAGE_CHARS: usize = 8 * 1024 * 1024;
+
+/// Ceiling on inline image payload across a whole request.
+const MAX_TOTAL_IMAGE_CHARS: usize = 24 * 1024 * 1024;
 
 /// A future produced by a provider. Boxed and `Send` so it can be spawned on
 /// the app runtime and outlive the IPC call that started it.
@@ -126,8 +139,12 @@ impl Provider for OpenAiCompatible {
 ///
 /// Total characters sent, logged so "the gateway refused because the payload was
 /// too big" is answerable after the fact instead of guessed at.
+///
+/// Text only: images are accounted separately by `Content::image_payload_bytes`,
+/// because a screenshot's base64 is three orders of magnitude larger than its
+/// caption and would swamp the number that diagnoses text-heavy rejections.
 fn req_chars(req: &ChatCall) -> usize {
-    req.messages.iter().map(|m| m.content.chars().count()).sum()
+    req.messages.iter().map(|m| m.content.text().chars().count()).sum()
 }
 
 /// One log line per request outcome.
@@ -191,6 +208,10 @@ pub async fn run_chat_with_deadlines<S>(
 {
     sink(AiStreamEvent::Started);
     let started = Instant::now();
+
+    if let Err(e) = validate_images(&req.messages) {
+        return fail(sink, e);
+    }
 
     let target = match client::resolve_target(&req.base_url) {
         Ok(t) => t,
@@ -352,6 +373,89 @@ fn fail<S: Fn(AiStreamEvent)>(sink: &S, e: AppError) {
 }
 
 /// Minimal request body: model, messages, stream, optional temperature.
+/// Serialize one message's content, collapsing an all-text block list to a bare
+/// JSON string.
+///
+/// The collapse is the prefix-cache invariant made structural rather than
+/// remembered. Providers match on the request prefix, and the document message
+/// must stay byte-identical between turns — which it only does if it keeps the
+/// shape it always had. A caller that assembles the document as a one-element
+/// block list would otherwise turn every turn into a cache miss, with no
+/// symptom anywhere: the answer still arrives, it just costs full price and
+/// takes seconds longer.
+///
+/// So the rule is total and independent of the caller: **no images means the
+/// content is text, and text goes out as a string.** Blocks that carry no image
+/// are joined with a newline, which is what separate text blocks mean.
+fn content_value(content: &Content) -> serde_json::Value {
+    match content {
+        Content::Text(s) => serde_json::Value::String(s.clone()),
+        Content::Parts(parts) => {
+            let has_image = parts
+                .iter()
+                .any(|p| matches!(p, ContentPart::ImageUrl { .. }));
+            if has_image {
+                serde_json::to_value(parts).unwrap_or_default()
+            } else {
+                let joined = parts
+                    .iter()
+                    .map(|p| match p {
+                        ContentPart::Text { text } => text.as_str(),
+                        ContentPart::ImageUrl { .. } => "",
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                serde_json::Value::String(joined)
+            }
+        }
+    }
+}
+
+/// Reject images that cannot possibly succeed, before spending a round trip.
+///
+/// Two rules, both about failures that are otherwise diagnosable only from a
+/// gateway's error text:
+///
+///  - `http://` is refused. A screenshot of a paper is the most sensitive thing
+///    this app sends; fetching it over cleartext to save a base64 encoding is
+///    not a trade worth making. `data:` and `https:` only.
+///  - Size ceilings, because a gateway's 413 arrives as an opaque 400 on most
+///    OpenAI-compatible implementations.
+fn validate_images(messages: &[ChatMessage]) -> AppResult<()> {
+    let mut total = 0usize;
+    for m in messages {
+        let Content::Parts(parts) = &m.content else {
+            continue;
+        };
+        for p in parts {
+            let ContentPart::ImageUrl { image_url } = p else {
+                continue;
+            };
+            let url = image_url.url.trim();
+            if !(url.starts_with("data:") || url.starts_with("https://")) {
+                return Err(AppError::new(
+                    codes::AI_BAD_CONFIG,
+                    "图片地址只支持 data: 或 https://（http:// 会明文传输文档内容）",
+                ));
+            }
+            if url.len() > MAX_INLINE_IMAGE_CHARS {
+                return Err(AppError::new(
+                    codes::AI_BAD_CONFIG,
+                    "单张图片过大，请截取更小的区域",
+                ));
+            }
+            total += url.len();
+        }
+    }
+    if total > MAX_TOTAL_IMAGE_CHARS {
+        return Err(AppError::new(
+            codes::AI_BAD_CONFIG,
+            "图片总大小超出限制，请减少图片数量或截取更小的区域",
+        ));
+    }
+    Ok(())
+}
+
 /// Deliberately free of `tools`, `response_format`, `thinking`,
 /// `reasoning_effort` and every other vendor extension.
 fn build_body(
@@ -363,12 +467,15 @@ fn build_body(
     let msgs: Vec<MsgOut> = messages
         .iter()
         .filter(|m| matches!(m.role.as_str(), "system" | "user" | "assistant"))
-        .map(|m| MsgOut { role: m.role.clone(), content: m.content.clone() })
+        .map(|m| MsgOut {
+            role: m.role.clone(),
+            content: content_value(&m.content),
+        })
         .collect();
 
     let mut obj = serde_json::Map::new();
     obj.insert("model".into(), serde_json::Value::String(model.to_string()));
-    obj.insert("messages".into(), serde_json::to_value(msgs).unwrap_or_default());
+    obj.insert("messages".into(), serde_json::to_value(&msgs).unwrap_or_default());
     obj.insert("stream".into(), serde_json::Value::Bool(stream));
     if let Some(t) = temperature {
         obj.insert("temperature".into(), serde_json::json!(t));
@@ -379,7 +486,7 @@ fn build_body(
 #[derive(Serialize)]
 struct MsgOut {
     role: String,
-    content: String,
+    content: serde_json::Value,
 }
 
 /// Apply one parsed SSE event to the sink.
@@ -620,12 +727,25 @@ fn parse_model_ids(body: &str) -> Option<Vec<String>> {
 mod tests {
     use super::*;
 
+    fn text(s: &str) -> Content {
+        Content::Text(s.to_string())
+    }
+
+    fn img(url: &str) -> ContentPart {
+        ContentPart::ImageUrl {
+            image_url: ImageUrl {
+                url: url.to_string(),
+                detail: None,
+            },
+        }
+    }
+
     #[test]
     fn body_is_minimal_and_lowercase_roles_only() {
         let msgs = vec![
-            ChatMessage { role: "system".into(), content: "s".into() },
-            ChatMessage { role: "user".into(), content: "u".into() },
-            ChatMessage { role: "tool".into(), content: "should be dropped".into() },
+            ChatMessage { role: "system".into(), content: text("s") },
+            ChatMessage { role: "user".into(), content: text("u") },
+            ChatMessage { role: "tool".into(), content: text("should be dropped") },
         ];
         let b = build_body("m", &msgs, None, true);
         let obj = b.as_object().unwrap();
@@ -640,7 +760,7 @@ mod tests {
 
     #[test]
     fn temperature_only_when_requested() {
-        let msgs = vec![ChatMessage { role: "user".into(), content: "u".into() }];
+        let msgs = vec![ChatMessage { role: "user".into(), content: text("u") }];
         assert!(!build_body("m", &msgs, None, true).as_object().unwrap().contains_key("temperature"));
         // f32 -> Value goes through f64, so compare approximately rather than
         // against the literal 0.3.
@@ -648,5 +768,143 @@ mod tests {
             .as_f64()
             .expect("temperature is a number");
         assert!((t - 0.3).abs() < 1e-6, "got {t}");
+    }
+
+    /// The prefix-cache invariant, stated as a test.
+    ///
+    /// Providers match on the request prefix, so the document message has to be
+    /// byte-identical between turns. It only is if it keeps the shape it always
+    /// had — a bare string. A one-element block list would serialise as an
+    /// array and silently cost the cache on every question, with no symptom
+    /// beyond a slower, more expensive answer.
+    #[test]
+    fn text_only_content_stays_a_bare_string() {
+        let msgs = vec![ChatMessage { role: "user".into(), content: text("论文全文") }];
+        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+        assert!(c.is_string(), "text must stay a string, got {c}");
+        assert_eq!(c.as_str().unwrap(), "论文全文");
+    }
+
+    /// The collapse, independent of the caller.
+    ///
+    /// `Content::Text` is the documented way to say "text", but a caller that
+    /// builds a one-element block list must not quietly become a cache miss.
+    /// The rule is total: no images means the content is text.
+    #[test]
+    fn all_text_block_list_collapses_to_a_string() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![
+                ContentPart::Text { text: "论文全文".into() },
+                ContentPart::Text { text: "第 3 页".into() },
+            ]),
+        }];
+        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+        assert!(c.is_string(), "no images means a string, got {c}");
+        assert_eq!(c.as_str().unwrap(), "论文全文\n第 3 页");
+    }
+
+    /// The multimodal shape: a block array, text first, in the order given.
+    #[test]
+    fn mixed_content_becomes_a_block_array() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![
+                ContentPart::Text { text: "这条曲线为什么断开？".into() },
+                img("data:image/png;base64,AAAA"),
+            ]),
+        }];
+        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+        let arr = c.as_array().expect("mixed content must be an array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[0]["text"], "这条曲线为什么断开？");
+        assert_eq!(arr[1]["type"], "image_url");
+        assert_eq!(arr[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
+
+    /// An image with no words is a legitimate question. It must not be treated
+    /// as an empty message and rejected.
+    #[test]
+    fn image_only_message_is_not_empty() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![img("data:image/png;base64,AAAA")]),
+        }];
+        assert!(!msgs[0].content.is_empty(), "an image is content");
+        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+        assert_eq!(c.as_array().unwrap().len(), 1);
+    }
+
+    /// `detail` is omitted rather than defaulted. Most gateways reject an
+    /// unrecognised enum value, and absence is portable across all of them.
+    #[test]
+    fn detail_is_omitted_when_unset() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![img("data:image/png;base64,AAAA")]),
+        }];
+        let part = &build_body("m", &msgs, None, true)["messages"][0]["content"][0];
+        assert!(part["image_url"].get("detail").is_none(), "got {part}");
+    }
+
+    /// A screenshot of a paper is the most sensitive payload this app sends.
+    /// Fetching it over cleartext to avoid a base64 encoding is not a trade
+    /// worth making.
+    #[test]
+    fn http_image_url_is_refused() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![img("http://example.com/a.png")]),
+        }];
+        let e = validate_images(&msgs).unwrap_err();
+        assert_eq!(e.code, codes::AI_BAD_CONFIG);
+    }
+
+    #[test]
+    fn https_and_data_urls_are_accepted() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![
+                img("https://example.com/a.png"),
+                img("data:image/png;base64,AAAA"),
+            ]),
+        }];
+        assert!(validate_images(&msgs).is_ok());
+    }
+
+    /// A gateway's 413 arrives as an opaque 400 on most OpenAI-compatible
+    /// implementations, so the ceiling is enforced locally where the message
+    /// can name the real problem.
+    #[test]
+    fn oversized_image_is_refused() {
+        let big = format!("data:image/png;base64,{}", "A".repeat(MAX_INLINE_IMAGE_CHARS + 1));
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Content::Parts(vec![img(&big)]),
+        }];
+        let e = validate_images(&msgs).unwrap_err();
+        assert_eq!(e.code, codes::AI_BAD_CONFIG);
+    }
+
+    /// The document message must survive an image turn untouched: images belong
+    /// to the question, never to the cached prefix.
+    #[test]
+    fn document_message_is_unchanged_by_an_image_question() {
+        let msgs = vec![
+            ChatMessage { role: "system".into(), content: text("sys") },
+            ChatMessage { role: "user".into(), content: text("<document_context>论文</document_context>") },
+            ChatMessage {
+                role: "user".into(),
+                content: Content::Parts(vec![
+                    ContentPart::Text { text: "这是什么图？".into() },
+                    img("data:image/png;base64,AAAA"),
+                ]),
+            },
+        ];
+        let b = build_body("m", &msgs, None, true);
+        let arr = b["messages"].as_array().unwrap();
+        assert!(arr[1]["content"].is_string(), "the document must stay a string");
+        assert!(arr[2]["content"].is_array(), "the question carries the image");
     }
 }

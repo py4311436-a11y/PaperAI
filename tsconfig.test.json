@@ -3,7 +3,10 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "strict": false,
     "skipLibCheck": true,
     "noEmit": false,
@@ -12,15 +15,20 @@
     "declaration": false,
     "sourceMap": false,
     "allowJs": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
-    "src/ai/context-builder.ts",
     "src/ai/chat-controller.ts",
     "src/ai/chat-panel.ts",
-    "src/ai/memory.ts",
+    "src/ai/context-builder.ts",
+    "src/ai/image-capture.ts",
     "src/ai/markdown-renderer.ts",
+    "src/ai/memory.ts",
+    "src/ai/screenshot-overlay.ts",
     "src/ai/types.ts",
+    "src/ai/vision-support.ts",
     "src/tools/erase-policy.ts",
     "tests/ai-unit/run.ts"
   ]

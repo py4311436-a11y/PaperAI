@@ -71,9 +71,56 @@ export interface ConnectionTest {
   model_echo: string | null;
 }
 
+/**
+ * One image reference, in the OpenAI-compatible block shape.
+ *
+ * `url` is a `data:` URL carrying already-downscaled base64 — Rust refuses
+ * anything that is not `data:` or `https://`, so an `http://` screenshot of a
+ * paper cannot leave the machine in cleartext by accident.
+ */
+export interface ImageUrlBlock {
+  image_url: {
+    url: string;
+    detail?: "low" | "high" | "auto";
+  };
+}
+
+/** One block of a multimodal message. Mirrors `ContentPart` in `types.rs`. */
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: ImageUrlBlock["image_url"] };
+
+/**
+ * A screenshot the user attached to a question.
+ *
+ * `url` is final: already downscaled, already encoded. Nothing downstream
+ * re-encodes it, so what the UI shows is byte-for-byte what gets sent.
+ */
+export interface ImageAttachment {
+  id: string;
+  /** `data:image/png;base64,...` */
+  url: string;
+  /** Base64 character count, for the size label in the UI. */
+  chars: number;
+  width: number;
+  height: number;
+  /** How it was captured — shown per message so the source is never ambiguous. */
+  source: "region" | "page";
+  /** 1-based page it came from, when known. */
+  page?: number;
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /**
+   * Plain text, or a block array when the message carries images.
+   *
+   * Text-only messages stay strings on purpose: providers match on the request
+   * prefix, and the document message has to be byte-identical between turns for
+   * the cache to hold. Rust collapses an all-text block list back to a string,
+   * so the invariant does not depend on this side remembering.
+   */
+  content: string | ContentPart[];
 }
 
 export type AiStreamEvent =
@@ -104,6 +151,17 @@ export interface ContextStats {
   pages_sent: number[];
   /** Total pages in the document, so the UI can show real coverage. */
   pages_total: number;
+  /**
+   * Images attached to this question.
+   *
+   * Counted separately from `chars` on purpose: a screenshot's base64 is three
+   * orders of magnitude larger than its caption, and its token cost is set by
+   * the provider's per-image cap (DeepSeek's is a flat 384) rather than by
+   * anything we can measure locally. So the number is reported as a count and
+   * never folded into a token estimate that would look authoritative and be
+   * wrong.
+   */
+  images: number;
 }
 
 /** A frozen copy of a PDF text selection. */
@@ -138,5 +196,14 @@ export interface ChatTurn {
   errorMessage?: string;
   /** Which context produced this turn — shown per message. */
   contextLabel?: string;
+  /**
+   * Screenshots sent with this turn, kept for display.
+   *
+   * The transcript has to show what was actually asked about: a question whose
+   * only subject is a figure is unreadable later without the figure. The same
+   * `data:` URLs go back into `history`, so the model keeps the context it
+   * answered with.
+   */
+  attachments?: ImageAttachment[];
   createdAt: number;
 }

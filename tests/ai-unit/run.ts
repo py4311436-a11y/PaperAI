@@ -20,7 +20,12 @@ import {
   PRESET_PROMPTS,
 } from "../../src/ai/context-builder.js";
 import { ChatController } from "../../src/ai/chat-controller.js";
-import type { ChatMessage, SelectionSnapshot } from "../../src/ai/types.js";
+import type {
+  ChatMessage,
+  ContentPart,
+  ImageAttachment,
+  SelectionSnapshot,
+} from "../../src/ai/types.js";
 
 /**
  * @typedef {{ documentId: string, pageNumbers: number[], text: string,
@@ -37,6 +42,25 @@ const snap = (text: string, pages: number[], doc = "doc-1"): SelectionSnapshot =
 });
 
 /**
+ * The text of a message, whatever shape it takes.
+ *
+ * Content became `string | ContentPart[]` for multimodal support, and these
+ * assertions are about wording — not about block structure, which has its own
+ * tests. Images contribute nothing to the text.
+ */
+function textOf(c: ChatMessage["content"]): string {
+  if (typeof c === "string") return c;
+  return c
+    .map((p) => (p.type === "text" ? p.text : ""))
+    .join("\n");
+}
+
+/** Every message's text, joined — the shape most assertions want. */
+function allText(messages: ChatMessage[]): string {
+  return messages.map((m) => textOf(m.content)).join("\n");
+}
+
+/**
  * The message that carries the document text.
  *
  * The document is no longer the last message — it is its own user message ahead
@@ -45,9 +69,9 @@ const snap = (text: string, pages: number[], doc = "doc-1"): SelectionSnapshot =
  * message is located by what it contains.
  */
 function docMessage(built) {
-  const m = built.messages.find((x) => x.content.includes("<document_context>"));
+  const m = built.messages.find((x) => textOf(x.content).includes("<document_context>"));
   if (!m) throw new Error("no message carries the document");
-  return m.content;
+  return textOf(m.content);
 }
 
 const base = {
@@ -64,7 +88,7 @@ const base = {
 
 test("mode none sends no document text at all", async () => {
   const built = await buildContext({ ...base, mode: "none" });
-  const joined = built.messages.map((m) => m.content).join("\n");
+  const joined = allText(built.messages);
   assert.ok(!joined.includes("<document_context>"), "none must not attach a document");
   assert.ok(!joined.includes("PAGE 3"));
   assert.equal(built.stats.chars, base.question.length);
@@ -89,7 +113,7 @@ test("mode selection sends exactly the selected text and its pages", async () =>
 
 test("mode selection with no selection does not fall back to the whole document", async () => {
   const built = await buildContext({ ...base, mode: "selection", selection: null });
-  const joined = built.messages.map((m) => m.content).join("\n");
+  const joined = allText(built.messages);
   assert.ok(!joined.includes("PAGE 3"), "must not widen the scope silently");
   assert.ok(!joined.includes("<document_context>"));
   assert.equal(built.label, "未选中文字");
@@ -107,7 +131,7 @@ test("mode current-page sends only that page", async () => {
     },
   });
   assert.deepEqual(seen, [4], "must fetch exactly one page");
-  const joined = built.messages.map((m) => m.content).join("\n");
+  const joined = allText(built.messages);
   assert.ok(joined.includes("BODY 4"));
   assert.ok(!joined.includes("BODY 3"));
   assert.ok(!joined.includes("BODY 5"));
@@ -155,7 +179,7 @@ test("whole-document sends every page with page markers", async () => {
     },
   });
   assert.deepEqual(seen, [1, 2, 3, 4], "must walk every page");
-  const joined = built.messages.map((m) => m.content).join("\n");
+  const joined = allText(built.messages);
   for (const n of [1, 2, 3, 4]) assert.ok(joined.includes(`[第 ${n} 页]`), `page marker ${n} missing`);
   assert.equal(built.stats.truncated, false, "a short document must not be reported as truncated");
   assert.deepEqual(built.stats.pages_sent, [1, 2, 3, 4]);
@@ -201,7 +225,7 @@ test("whole-document that overflows names the pages it actually sent", async () 
     "the budget must stop the walk, not cut the text at an arbitrary offset"
   );
 
-  const joined = built.messages.map((m) => m.content).join("\n");
+  const joined = allText(built.messages);
   // Assert on the USER turn specifically. The system prompt also mentions
   // "部分内容" (it instructs the model how to behave when told the context is
   // partial), so searching the whole payload would pass even if the coverage
@@ -249,7 +273,7 @@ test("whole-document still sends something when one page alone overflows the bud
   });
   assert.equal(built.stats.truncated, true);
   assert.deepEqual(built.stats.pages_sent, [1], "the first page must still be sent, truncated");
-  assert.ok(built.messages.map((m) => m.content).join("\n").includes("P1"));
+  assert.ok(allText(built.messages).includes("P1"));
 });
 
 test("current page is clamped to the real page count", async () => {
@@ -365,7 +389,7 @@ test("only the display title is sent, never a filesystem path", async () => {
     selection: snap("x", [1]),
     documentTitle: "论文.pdf",
   });
-  const joined = built.messages.map((m) => m.content).join("\n");
+  const joined = allText(built.messages);
   assert.ok(joined.includes("论文.pdf"));
   assert.ok(!joined.includes("C:\\"), "absolute paths must never be sent");
   assert.ok(!joined.includes("Users"), "user name must never be sent");
@@ -381,7 +405,315 @@ test("history is bounded and ordered oldest-first", async () => {
   const roles = built.messages.map((m) => m.role);
   assert.deepEqual(roles, ["system", "user", "assistant", "user", "assistant", "user"]);
   assert.equal(built.messages.at(-1).role, "user");
-  assert.ok(built.messages.at(-1).content.includes(base.question));
+  assert.ok(textOf(built.messages.at(-1).content).includes(base.question));
+});
+
+// ------------------------------------------------------- multimodal (A-23)
+
+const shot = (page: number): ImageAttachment => ({
+  id: `img-${page}`,
+  url: `data:image/png;base64,PAGE${page}`,
+  chars: 4096,
+  width: 1200,
+  height: 800,
+  source: "region",
+  page,
+});
+
+test("a question with no attachments stays a plain string", async () => {
+  const built = await buildContext({ ...base, mode: "none" });
+  const last = built.messages.at(-1);
+  assert.equal(typeof last.content, "string", "text-only must stay a string");
+});
+
+test("a question with an attachment becomes a block array, text first", async () => {
+  const built = await buildContext({ ...base, mode: "none", attachments: [shot(4)] });
+  const c = built.messages.at(-1).content;
+  assert.ok(Array.isArray(c), "an image means a block array");
+  assert.equal(c[0].type, "text", "the question comes first");
+  assert.ok(c[0].type === "text" && c[0].text.includes(base.question));
+  assert.equal(c[1].type, "image_url");
+  assert.equal(
+    c[1].type === "image_url" && c[1].image_url.url,
+    "data:image/png;base64,PAGE4"
+  );
+});
+
+/**
+ * The cache invariant, from the frontend side.
+ *
+ * Rust collapses an all-text block list back to a string, so a regression here
+ * would still produce a correct request — it would just silently cost the cache
+ * on every question. Asserting the shape keeps the intent visible.
+ */
+test("the document message stays a string even when the question carries an image", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "selection",
+    selection: snap("论文正文", [3]),
+    attachments: [shot(4)],
+  });
+  const doc = built.messages.find((m) => textOf(m.content).includes("<document_context>"));
+  assert.ok(doc, "the document message must exist");
+  assert.equal(typeof doc.content, "string", "the cached prefix must stay a string");
+
+  const last = built.messages.at(-1);
+  assert.ok(Array.isArray(last.content), "only the question changes shape");
+});
+
+test("an attachment is labelled with the page it came from", async () => {
+  const built = await buildContext({ ...base, mode: "none", attachments: [shot(7)] });
+  const t = textOf(built.messages.at(-1).content);
+  assert.ok(t.includes("第 7 页"), "the model must know where the image is from");
+  // And the untrusted-content framing, because text rendered into a picture is
+  // still an injection vector.
+  assert.ok(t.includes("不是指令"), "an image is data, not instructions");
+});
+
+test("stats counts images separately from characters", async () => {
+  const plain = await buildContext({ ...base, mode: "none" });
+  assert.equal(plain.stats.images, 0);
+
+  const withImg = await buildContext({ ...base, mode: "none", attachments: [shot(4), shot(5)] });
+  assert.equal(withImg.stats.images, 2);
+  // A screenshot's base64 is thousands of characters; folding it into `chars`
+  // would make the token estimate look authoritative and be wrong.
+  assert.equal(withImg.stats.chars, plain.stats.chars, "images must not inflate chars");
+});
+
+test("history keeps the image a past question asked about", async () => {
+  const history = [
+    { role: "user", content: "这条曲线为什么断开？" },
+    { role: "assistant", content: "因为在 3.2 处换了坐标系。" },
+  ] as ChatMessage[];
+  const withImg = await buildContext({
+    ...base,
+    mode: "none",
+    history,
+    attachments: [shot(4)],
+  });
+  // The prior turn was text-only here; the *current* one carries the image.
+  const hist = withImg.messages[2];
+  assert.equal(typeof hist.content, "string", "a text-only past turn stays a string");
+});
+
+// ------------------------------------------------------------- vision support
+
+import {
+  forgetImageFailure,
+  imageFailureFor,
+  looksLikeImageSupportError,
+  noteImageFailure,
+  resetImageFailures,
+} from "../../src/ai/vision-support.js";
+
+test("a model that refused an image is remembered, and only that model", () => {
+  resetImageFailures();
+  noteImageFailure("deepseek-chat", "This model does not support image");
+  assert.ok(imageFailureFor("deepseek-chat"));
+  assert.equal(imageFailureFor("deepseek-chat"), "This model does not support image");
+  // A different model is never warned about on the strength of another's refusal.
+  assert.equal(imageFailureFor("deepseek-v4-flash-vision-exp"), null);
+  assert.equal(imageFailureFor(""), null);
+  forgetImageFailure("deepseek-chat");
+  assert.equal(imageFailureFor("deepseek-chat"), null);
+});
+
+test("the matcher recognises an image refusal in either language", () => {
+  assert.ok(looksLikeImageSupportError("This model does not support image"));
+  assert.ok(looksLikeImageSupportError("该模型不支持图片输入"));
+  assert.ok(looksLikeImageSupportError("multimodal input required"));
+  // An unrelated failure must not be recorded as a vision problem, or the user
+  // gets warned about the wrong thing forever.
+  assert.ok(!looksLikeImageSupportError("rate limit exceeded"));
+  assert.ok(!looksLikeImageSupportError("invalid api key"));
+});
+
+// ------------------------------------------------------- screenshot overlay
+
+import {
+  ScreenshotOverlay,
+  normaliseRect,
+  toCanvasRect,
+} from "../../src/ai/screenshot-overlay.js";
+
+test("normaliseRect clamps a drag into the container and orders the corners", () => {
+  // Dragged up and to the left of the start point.
+  const r = normaliseRect({ x: 300, y: 300 }, { x: 100, y: 100 }, { width: 800, height: 600 });
+  assert.deepEqual(r, { x: 100, y: 100, width: 200, height: 200 });
+});
+
+test("normaliseRect clamps a drag that runs off the edge", () => {
+  const r = normaliseRect({ x: 700, y: 500 }, { x: 900, y: 700 }, { width: 800, height: 600 });
+  assert.deepEqual(r, { x: 700, y: 500, width: 100, height: 100 });
+});
+
+test("normaliseRect rejects a mis-click rather than capturing nothing", () => {
+  assert.equal(normaliseRect({ x: 10, y: 10 }, { x: 13, y: 12 }, { width: 800, height: 600 }), null);
+  assert.equal(normaliseRect({ x: 10, y: 10 }, { x: 10, y: 10 }, { width: 800, height: 600 }), null);
+});
+
+test("toCanvasRect applies the zoom scale in both axes", () => {
+  // A page displayed at half size: its canvas is twice as many pixels as the
+  // CSS box is wide. Missing this factor captures the right area at double
+  // size, i.e. half the content the user pointed at.
+  const r = toCanvasRect({ left: 200, top: 100, width: 300, height: 200 }, 100, 50, 0.5);
+  assert.deepEqual(r, { x: 50, y: 25, width: 150, height: 100 });
+});
+
+test("toCanvasRect at 1:1 is the identity apart from the page offset", () => {
+  const r = toCanvasRect({ left: 260, top: 180, width: 40, height: 40 }, 260, 180, 1);
+  assert.deepEqual(r, { x: 0, y: 0, width: 40, height: 40 });
+});
+
+test("toCanvasRect measures from the canvas, not from the viewer", () => {
+  // The selection is in client coordinates, so a page scrolled far down the
+  // viewer still maps correctly — the canvas's own box is the only reference.
+  const r = toCanvasRect({ left: 140, top: 900, width: 60, height: 60 }, 100, 860, 1);
+  assert.deepEqual(r, { x: 40, y: 40, width: 60, height: 60 });
+});
+
+// ------------------------------------------------------------ image capture
+
+import {
+  DEFAULT_CAPTURE_LIMITS,
+  MAX_ATTEMPTS,
+  attemptPlan,
+  captureRegion,
+  describeChars,
+  fitWithin,
+} from "../../src/ai/image-capture.js";
+
+test("fitWithin shrinks only the long side and keeps the aspect ratio", () => {
+  const r = fitWithin(3120, 2340, 1568);
+  assert.equal(r.width, 1568);
+  assert.equal(r.height, 1176);
+  // 3120/2340 === 1568/1176
+  assert.ok(Math.abs(r.width / r.height - 3120 / 2340) < 0.01);
+});
+
+test("fitWithin never upscales a small region", () => {
+  const r = fitWithin(400, 300, 1568);
+  assert.deepEqual(r, { width: 400, height: 300 });
+  // Inventing pixels adds no information and costs bytes.
+  const exact = fitWithin(1568, 800, 1568);
+  assert.deepEqual(exact, { width: 1568, height: 800 });
+});
+
+test("fitWithin survives degenerate input", () => {
+  assert.deepEqual(fitWithin(0, 500, 1568), { width: 0, height: 0 });
+  assert.deepEqual(fitWithin(500, 0, 1568), { width: 0, height: 0 });
+  assert.deepEqual(fitWithin(-10, 500, 1568), { width: 0, height: 0 });
+  // A sliver must not collapse to zero and throw.
+  const sliver = fitWithin(5000, 1, 1568);
+  assert.equal(sliver.width, 1568);
+  assert.ok(sliver.height >= 1, "a 1px-tall region must stay sendable");
+});
+
+test("the ladder starts at PNG and only falls back to JPEG when it must", () => {
+  // A figure or a formula is line art; JPEG's 8x8 blocks ring exactly where the
+  // detail is. So PNG first, always.
+  assert.equal(attemptPlan(0).mime, "image/png");
+  assert.equal(attemptPlan(1).mime, "image/jpeg");
+  assert.ok(attemptPlan(1).quality! > 0.8, "the first fallback stays near-lossless");
+  // Scale only comes down once quality alone has clearly failed.
+  assert.equal(attemptPlan(1).scale, 1);
+  assert.ok(attemptPlan(2).scale < 1);
+  assert.ok(attemptPlan(3).scale < attemptPlan(2).scale);
+  // Past the last rung it refuses rather than sending something illegible.
+  for (let i = MAX_ATTEMPTS; i < MAX_ATTEMPTS + 3; i++) {
+    assert.equal(attemptPlan(i).scale, attemptPlan(MAX_ATTEMPTS - 1).scale);
+  }
+});
+
+/** A stand-in canvas: records what was drawn, encodes to a chosen length. */
+function fakeCanvas(nextLength: () => number) {
+  const drawn: unknown[] = [];
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext: () => ({
+      fillStyle: "",
+      fillRect: (...a: unknown[]) => drawn.push(["fill", ...a]),
+      drawImage: (...a: unknown[]) => drawn.push(["draw", ...a]),
+    }),
+    toDataURL: (mime: string) => `data:${mime};base64,${"A".repeat(nextLength())}`,
+  };
+  return { canvas: canvas as unknown as HTMLCanvasElement, drawn };
+}
+
+const LIMITS = { maxEdge: 1568, maxChars: 1000 };
+
+test("captureRegion returns the first rung that fits, with its real size", async () => {
+  const { canvas, drawn } = fakeCanvas(() => 100);
+  const r = await captureRegion(
+    canvas,
+    { x: 0, y: 0, width: 3120, height: 2340 },
+    LIMITS,
+    undefined,
+    () => canvas
+  );
+  assert.equal(r.mime, "image/png", "PNG wins when it fits");
+  assert.equal(r.width, 1568);
+  assert.equal(r.height, 1176);
+  // `chars` is the whole data: URL, because that is what crosses the wire and
+  // what Rust measures — not the base64 alone.
+  assert.equal(r.chars, r.url.length);
+  assert.ok(r.chars <= LIMITS.maxChars);
+  assert.ok(r.url.startsWith("data:image/png;base64,"));
+  // The white matte goes down before the image, so transparency cannot become
+  // a black hole in a format with no alpha.
+  assert.equal((drawn[0] as unknown[])[0], "fill");
+  assert.equal((drawn[1] as unknown[])[0], "draw");
+});
+
+test("captureRegion steps down the ladder when the payload will not fit", async () => {
+  const { canvas } = fakeCanvas(() => 5000);
+  await assert.rejects(
+    () =>
+      captureRegion(canvas, { x: 0, y: 0, width: 3120, height: 2340 }, LIMITS, undefined, () => canvas),
+    /截图过大/
+  );
+  // Nothing partial is returned: the caller either gets a sendable image or an
+  // error it can act on.
+});
+
+test("captureRegion falls back to JPEG and then to a smaller scale", async () => {
+  const lengths = [5000, 5000, 900];
+  let i = 0;
+  const { canvas } = fakeCanvas(() => lengths[i++]);
+  const r = await captureRegion(
+    canvas,
+    { x: 0, y: 0, width: 3120, height: 2340 },
+    LIMITS,
+    undefined,
+    () => canvas
+  );
+  assert.equal(r.mime, "image/jpeg");
+  assert.equal(i, 3, "it took three rungs");
+  // Third rung scales to 0.7 of the fitted size.
+  assert.equal(r.width, Math.round(1568 * 0.7));
+});
+
+test("captureRegion refuses an empty region instead of sending a blank image", async () => {
+  const { canvas } = fakeCanvas(() => 10);
+  await assert.rejects(
+    () => captureRegion(canvas, { x: 0, y: 0, width: 0, height: 0 }, LIMITS, undefined, () => canvas),
+    /区域为空/
+  );
+});
+
+test("describeChars reads as a size, not a number", () => {
+  assert.equal(describeChars(512), "512 B");
+  assert.equal(describeChars(2048), "2 KB");
+  assert.equal(describeChars(3 * 1024 * 1024), "3.0 MB");
+});
+
+test("the default ceiling is inside every provider's documented limit", () => {
+  // DeepSeek: 48 MiB body. OpenAI: 20 MB per image. Ours must be well under
+  // both, and small enough that a few screenshots cannot blow up a request.
+  assert.ok(DEFAULT_CAPTURE_LIMITS.maxChars <= 8 * 1024 * 1024);
+  assert.ok(DEFAULT_CAPTURE_LIMITS.maxChars >= 512 * 1024, "too small to be useful");
 });
 
 // ---------------------------------------------------------- chat controller
@@ -402,7 +734,17 @@ function makeController(behaviour?: (emit: (ev: any) => void) => Promise<void>) 
   return { c, listeners };
 }
 
-const built = { contextLabel: "第 1 页", stats: { chars: 10, approx_tokens: 4, truncated: false, pages_sent: [1], pages_total: 1 } };
+const built = {
+  contextLabel: "第 1 页",
+  stats: {
+    chars: 10,
+    approx_tokens: 4,
+    truncated: false,
+    pages_sent: [1],
+    pages_total: 1,
+    images: 0,
+  },
+};
 
 test("send appends a user turn and streams the assistant turn", async () => {
   const { c } = makeController(async (emit) => {
@@ -567,6 +909,43 @@ test("history skips turns with no usable answer", async () => {
   c.setProfileId("p1");
   await c.send({ question: "q1", messages: [], ...built });
   assert.equal(c.history().length, 0, "an empty answer is not useful history");
+});
+
+/**
+ * A past question about a figure must keep that figure.
+ *
+ * The transcript shows the question and the thumbnails separately, so the wire
+ * format has to reassemble them. Dropping the image here would leave the model
+ * answering follow-ups about a picture it can no longer see — and the user with
+ * no way to tell why the answers stopped making sense.
+ */
+test("history carries the image a past question asked about", async () => {
+  const { c } = makeController(async (emit) => {
+    emit({ type: "delta", text: "因为它换了坐标系" });
+    emit({ type: "completed", finish_reason: "stop" });
+  });
+  c.openDocument("doc-1");
+  c.setProfileId("p1");
+  await c.send({
+    question: "这条曲线为什么断开？",
+    messages: [],
+    ...built,
+    attachments: [shot(4)],
+  });
+  const h = c.history();
+  assert.equal(h.length, 2);
+  assert.ok(Array.isArray(h[0].content), "the image must survive into history");
+  const parts = h[0].content as ContentPart[];
+  assert.equal(parts[0].type, "text");
+  assert.ok(parts[0].type === "text" && parts[0].text.includes("这条曲线为什么断开？"));
+  assert.equal(parts[1].type, "image_url");
+  assert.equal(
+    parts[1].type === "image_url" && parts[1].image_url.url,
+    "data:image/png;base64,PAGE4"
+  );
+  // And the turn keeps the attachment for display, because a question whose only
+  // subject is a figure is unreadable later without the figure.
+  assert.equal(c.turns()[0].attachments?.length, 1);
 });
 
 test("new conversation clears the transcript but keeps the context mode", async () => {

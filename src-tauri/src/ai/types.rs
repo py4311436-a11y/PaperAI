@@ -69,11 +69,127 @@ pub struct ModelOption {
     pub free_hint: bool,
 }
 
+/// An image reference inside a multimodal message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImageUrl {
+    /// A `data:` URL (base64 inline) or an `https://` URL.
+    ///
+    /// Validated in Rust before the request goes out — see
+    /// `provider::validate_images`. Plain `http://` is refused: it would put
+    /// the user's document on the wire in cleartext.
+    pub url: String,
+    /// `low` / `high` / `auto`, when the provider supports the knob.
+    ///
+    /// Omitted rather than defaulted: DeepSeek documents `low` as a 512×512
+    /// downscale, and sending an unrecognised value is a 400 on stricter
+    /// gateways. Absence is the portable choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// One block of a multimodal message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrl },
+}
+
+/// Message content — plain text, or a sequence of blocks.
+///
+/// Untagged, so a text-only message still serialises as a bare JSON string.
+/// That is not cosmetic. Providers match on the request prefix, and the
+/// document message has to stay byte-identical between turns for the cache to
+/// hold — which it only does if it keeps the exact shape it always had. A
+/// caller that assembles the document as a one-element block list would
+/// otherwise turn every turn into a cache miss without any visible symptom.
+/// `provider::content_value` enforces the collapse, so the shape does not
+/// depend on the caller remembering.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Content {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+impl Content {
+    /// Plain text, concatenated. Used for logging and emptiness checks — never
+    /// for the wire, where the block structure has to survive.
+    pub fn text(&self) -> String {
+        match self {
+            Content::Text(s) => s.clone(),
+            Content::Parts(parts) => parts
+                .iter()
+                .map(|p| match p {
+                    ContentPart::Text { text } => text.as_str(),
+                    ContentPart::ImageUrl { .. } => "",
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    /// True when there is neither text nor an image.
+    ///
+    /// An image-only message is legitimate — "what is in this figure" with no
+    /// other words — so images count as content here.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Content::Text(s) => s.trim().is_empty(),
+            Content::Parts(parts) => parts.iter().all(|p| match p {
+                ContentPart::Text { text } => text.trim().is_empty(),
+                ContentPart::ImageUrl { image_url } => image_url.url.trim().is_empty(),
+            }),
+        }
+    }
+
+    pub fn image_count(&self) -> usize {
+        match self {
+            Content::Text(_) => 0,
+            Content::Parts(parts) => parts
+                .iter()
+                .filter(|p| matches!(p, ContentPart::ImageUrl { .. }))
+                .count(),
+        }
+    }
+
+    /// Bytes of inline image payload, used to keep the audit log answerable
+    /// when a gateway rejects an oversized body. Counts the base64 characters
+    /// of `data:` URLs only; a remote URL contributes nothing to the body.
+    pub fn image_payload_bytes(&self) -> usize {
+        match self {
+            Content::Text(_) => 0,
+            Content::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::ImageUrl { image_url } => Some(image_url.url.len()),
+                    ContentPart::Text { .. } => None,
+                })
+                .sum(),
+        }
+    }
+}
+
+/// Ergonomic constructors, so the common "just text" case stays a one-liner at
+/// every call site instead of forcing `Content::Text(...)` into places that
+/// have nothing to do with multimodality.
+impl From<&str> for Content {
+    fn from(s: &str) -> Self {
+        Content::Text(s.to_string())
+    }
+}
+
+impl From<String> for Content {
+    fn from(s: String) -> Self {
+        Content::Text(s)
+    }
+}
+
 /// A chat message as sent by the frontend. `role` is validated in Rust.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: Content,
 }
 
 /// Everything needed to start one streamed completion.

@@ -663,3 +663,91 @@
   flex: 0 0 auto;
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------- screenshot (A-23) */
+
+/*
+ * Region selection over the viewer.
+ *
+ * A sibling layer, not a replacement for the page: the viewer's own scrolling
+ * has to keep working, and pdf.js must not lose the pointer it is tracking.
+ * `crosshair` is the whole affordance — a modal here would fight the app.
+ */
+.ai-shot-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  cursor: crosshair;
+  /* A wash rather than a dim: the page has to stay readable to aim at. */
+  background: rgba(90, 130, 200, 0.08);
+  touch-action: none;
+}
+.ai-shot-box {
+  position: absolute;
+  border: 1px solid rgba(60, 100, 180, 0.9);
+  background: rgba(90, 130, 200, 0.15);
+  /* No shadow: it has to read as a measurement, not a widget. */
+  pointer-events: none;
+}
+
+/* Pending attachments, between the textarea and the send row. */
+.ai-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 2px;
+}
+.ai-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--border, #d8dbe0);
+  border-radius: 6px;
+  background: rgba(90, 130, 200, 0.08);
+}
+.ai-attach-chip img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 3px;
+  display: block;
+}
+.ai-attach-label {
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.ai-attach-del {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border, #d8dbe0);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.ai-attach-del:hover {
+  border-color: rgba(196, 90, 80, 0.6);
+  color: #b3453c;
+}
+
+/* What a past question was about. Same data: URLs that were sent. */
+.ai-turn-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 6px;
+}
+.ai-turn-attachments img {
+  max-width: 180px;
+  max-height: 120px;
+  border: 1px solid var(--border, #d8dbe0);
+  border-radius: 4px;
+  display: block;
+}
+
+.ai-note.ai-warn {
+  opacity: 1;
+  color: #8a5a12;
+}
