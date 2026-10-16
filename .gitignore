@@ -1,6 +1,10 @@
 node_modules/
-dist/
-dist-test/
+# Build output. `dist*/` rather than `dist/` on purpose: the build flow renames
+# dist out of the way before rebuilding (vite's emptyOutDir trips the Windows
+# safe-delete guard on large trees), which leaves a `dist.stale-NNN/` directory
+# behind. Listing only `dist/` let 202 KaTeX font/asset files get committed that
+# way once.
+dist*/
 target/
 # Shipped installers. Deliberately OUTSIDE dist/: tauri.conf.json embeds all of
 # dist/ into the binary, so an installer kept there gets nested into the next one.
