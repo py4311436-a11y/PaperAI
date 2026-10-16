@@ -63,6 +63,38 @@ console.log(`copied : ${path.relative(ROOT, dest)}`);
 console.log(`bytes  : ${bytes} (${(bytes / 1024 / 1024).toFixed(2)} MiB)`);
 console.log(`sha256 : ${sha}`);
 
+// Retire the previous installer from git.
+//
+// Only the current one is tracked — see the `release/*` negation in
+// .gitignore, which names the version explicitly so a stray `git add -A`
+// cannot sweep in the whole directory. That leaves one manual step: the
+// installer committed for the *previous* version is still in the index, and
+// forgetting to drop it is how the repository ends up carrying every build
+// ever shipped, ~5 MiB each, forever.
+//
+// Done here rather than left to memory because the cost of getting it wrong is
+// invisible at the time and permanent afterwards. The file stays on disk; this
+// only untracks it, so the local archive is untouched.
+{
+  const { execFileSync } = await import("node:child_process");
+  const tracked = execFileSync("git", ["ls-files", "release"], { cwd: ROOT, encoding: "utf8" })
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const stale = tracked.filter((f) => path.basename(f) !== wanted);
+  for (const f of stale) {
+    try {
+      execFileSync("git", ["rm", "--cached", "--quiet", f], { cwd: ROOT, stdio: "pipe" });
+      console.log(`untracked (superseded): ${path.relative(ROOT, f)}`);
+    } catch (e) {
+      // Not fatal: the file is simply still tracked. Say so loudly, because
+      // silence here is what lets the repository grow.
+      console.error(`WARNING: could not untrack ${f}: ${e.message ?? e}`);
+    }
+  }
+}
+
+
 // A sanity bound. Anything far above this almost certainly means something was
 // bundled that should not have been.
 const SOFT_LIMIT = 12 * 1024 * 1024;
