@@ -497,6 +497,19 @@ test("history keeps the image a past question asked about", async () => {
   assert.equal(typeof hist.content, "string", "a text-only past turn stays a string");
 });
 
+// --------------------------------------------------------- memory retention
+
+import { shouldRemember } from "../../src/ai/memory.js";
+
+test("everything is remembered except a translation", () => {
+  // The one exclusion is not arbitrary: a translation restates the paper
+  // verbatim, and the memory file is capped and trimmed oldest-first, so each
+  // translation entry crowds out one that was insight.
+  assert.equal(shouldRemember("translate"), false);
+  assert.equal(shouldRemember("explain"), true);
+  assert.equal(shouldRemember("free"), true);
+});
+
 // ------------------------------------------------------------- vision support
 
 import {

@@ -1,18 +1,18 @@
 # Frontend AI unit tests
 
-Generated: 2026-10-16T15:05:18.538Z
+Generated: 2026-10-16T15:48:39.025Z
 Runner: scripts/run-ai-unit-tests.mjs (compiles src/ai/*.ts with tsc, then node --test)
 Compiled from: src/ai/context-builder.ts, chat-controller.ts, markdown-renderer.ts, types.ts
 
 | Suite | Pass | Total |
 |---|---|---|
-| context + chat controller | 62 | 62 |
+| context + chat controller | 63 | 63 |
 | markdown safety | 27 | 27 |
 | panel provider/model picker | 16 | 16 |
 | interrupted answer (A-16) | 11 | 11 |
 | eraser policy (A-18) | 6 | 6 |
 | reading memory chunking (A-19) | 28 | 28 |
 
-**150/150 PASS**
+**151/151 PASS**
 
 These tests import the real sources, so they cannot drift from the shipped code.

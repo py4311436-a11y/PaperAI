@@ -34,7 +34,19 @@ evidence/**/*.jpg
 evidence/**/*.pdf
 # Shipped installers. Deliberately OUTSIDE dist/: tauri.conf.json embeds all of
 # dist/ into the binary, so an installer kept there gets nested into the next one.
-release/
+#
+# The current installer IS committed, so the collaborator can install the latest
+# build without building it. `release/*` first, then a negation naming that one
+# file — without the blanket rule git would not descend into the directory to
+# apply it.
+#
+# The version is spelled out on purpose. A pattern like `*_x64-setup.exe` would
+# also match the twelve older installers sitting in that directory, and one
+# `git add -A` would commit 65 MiB of them. Bump this line as part of the
+# release; committing every version would grow the repository by ~5 MiB each,
+# permanently, because git never forgets a blob.
+release/*
+!release/PaperAI_0.6.0_x64-setup.exe
 *.local
 .DS_Store
 public/cmaps/

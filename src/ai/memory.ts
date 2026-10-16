@@ -54,6 +54,26 @@ const PAGE_MARKER_OVERHEAD = 12;
  * Pure, so the packing rules (no page split across chunks, no empty chunks, no
  * gaps, pages in order) are directly testable.
  */
+/** How a question reached the model. Decides whether it is worth remembering. */
+export type QuestionKind = "free" | "explain" | "translate";
+
+/**
+ * Whether an exchange belongs in the document's reading memory.
+ *
+ * A translation is the one exclusion, and it is not an arbitrary one: a
+ * translation restates the paper verbatim, so it adds no understanding. The
+ * memory file is capped (2 MiB in Rust) and trimmed oldest-first, so every
+ * translation entry permanently crowds out an entry that was insight. An
+ * explanation, an opinion about the paper, a question about a figure — those
+ * are what the memory is for.
+ *
+ * Pure and named rather than inlined at the call site, because this is a policy
+ * the user set explicitly and a silent change to it would be invisible.
+ */
+export function shouldRemember(kind: QuestionKind): boolean {
+  return kind !== "translate";
+}
+
 export function planChunks(pages: PageText[], budget = CHUNK_CHAR_BUDGET): Chunk[] {
   const out: Chunk[] = [];
   let current: PageText[] = [];

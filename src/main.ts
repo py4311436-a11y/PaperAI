@@ -31,6 +31,7 @@ import {
   memoryContextBlock,
   mergePrompt,
   planChunks,
+  shouldRemember,
   type ChunkNote,
   type PageText,
 } from "./ai/memory";
@@ -494,11 +495,22 @@ async function doHighlight(): Promise<void> {
   }
 }
 
-/** Build the context and send. Shared by presets and free-form questions. */
+/**
+ * Build the context and send. Shared by presets and free-form questions.
+ *
+ * @param remember Whether this exchange belongs in the document's reading
+ *   memory. False for exactly one case — a translation — because a translation
+ *   is a verbatim restatement of the paper: it adds no understanding, and the
+ *   memory file is capped at 2 MiB with oldest-first trimming, so every
+ *   translation entry crowds out an entry that was actually insight. Everything
+ *   else — an opinion about the paper, the explanation that finally made a
+ *   method section make sense — is what the memory is for.
+ */
 async function sendWithMode(
   question: string,
   mode: ContextMode,
-  attachments: ImageAttachment[] = []
+  attachments: ImageAttachment[] = [],
+  remember = true,
 ): Promise<void> {
   if (!activeProfileId) {
     panel.show();
@@ -575,20 +587,29 @@ async function sendWithMode(
     }
   }
 
-  // Auto-append for whole-document questions only: those are the ones whose
-  // answers are worth keeping, and they are rare enough that a disk write per
-  // question is not a nuisance.
-  if (turnId && mode === "whole-document") {
+  // Keep the exchange in the document's reading memory.
+  //
+  // Everything is kept except a translation — see `sendWithMode`'s `remember`
+  // parameter for why that one is excluded. Previously only `whole-document`
+  // qualified, which meant an opinion about the paper, or the explanation that
+  // finally made a method section make sense, was forgotten the moment the
+  // panel closed, and the next session started from nothing.
+  if (turnId && remember) {
     void appendMemoryFromTurn(question, turnId);
   }
 }
 
 /**
- * Append a finished whole-document exchange to the reading memory.
+ * Append a finished exchange to the reading memory.
  *
  * Best effort and silent on failure: the answer is already on screen, and a
  * write problem (read-only folder, sync conflict, foreign file in the way)
  * must not turn a good answer into an error state.
+ *
+ * The safety of the write itself is Rust's job, not this function's: the marker
+ * check that refuses to touch a file we did not write, the 2 MiB cap, and the
+ * oldest-first trimming all live in `ai/memory.rs`. Nothing here can bypass
+ * them, which is why a bad write fails quietly instead of corrupting a file.
  */
 async function appendMemoryFromTurn(question: string, turnId: string): Promise<void> {
   if (!currentPath) return;
@@ -620,7 +641,9 @@ async function askWithPreset(which: "explain" | "translate"): Promise<void> {
     return;
   }
   selectionBar.hide();
-  await sendWithMode(PRESET_PROMPTS[which], "selection");
+  // An explanation is understanding and belongs in the memory. A translation is
+  // a restatement of the paper and does not — see `shouldRemember`.
+  await sendWithMode(PRESET_PROMPTS[which], "selection", [], shouldRemember(which));
 }
 
 async function askQuestion(
