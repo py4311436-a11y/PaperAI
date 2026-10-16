@@ -19,6 +19,7 @@ import {
   buildMemoryDocument,
   chunkMessages,
   mergePrompt,
+  injectMemory,
   memoryContextBlock,
   planChunks,
   CHUNK_CHAR_BUDGET,
@@ -203,4 +204,56 @@ test("prompts forbid restating the source, which is what makes notes mergeable",
   const msgs = chunkMessages(planChunks(pages(1))[0], 1);
   const last = msgs[msgs.length - 1].content;
   assert.ok(last.includes("不要复述原文"), "verbatim copying makes merging expensive");
+});
+/* ------------------------------------------------- A-21: how memory is injected */
+
+const baseMsgs = [
+  { role: "system", content: "SYSTEM_PROMPT" },
+  { role: "user", content: "第一问" },
+  { role: "assistant", content: "第一答" },
+  { role: "user", content: "【来源】《p.pdf》\n<document_context>正文</document_context>" },
+];
+
+test("memory must NOT become a second system message", () => {
+  // OpenCode and several other OpenAI-compatible gateways validate the role
+  // sequence and reject a payload with more than one `system` entry. Sending
+  // one would mean this feature 400s on first use.
+  const out = injectMemory(baseMsgs, "<reading_memory>\n笔记\n</reading_memory>");
+  assert.equal(
+    out.filter((m) => m.role === "system").length,
+    1,
+    "exactly one system message must remain"
+  );
+});
+
+test("the role sequence is otherwise untouched", () => {
+  const out = injectMemory(baseMsgs, "<reading_memory>x</reading_memory>");
+  assert.deepEqual(
+    out.map((m) => m.role),
+    baseMsgs.map((m) => m.role)
+  );
+  assert.equal(out.length, baseMsgs.length, "no message may be added or dropped");
+});
+
+test("memory is placed in the final user turn, ahead of the document text", () => {
+  const out = injectMemory(baseMsgs, "<reading_memory>上一轮的结论</reading_memory>");
+  const last = out[out.length - 1];
+  assert.ok(last.content.startsWith("<reading_memory>"), last.content.slice(0, 80));
+  assert.ok(
+    last.content.indexOf("<reading_memory>") < last.content.indexOf("<document_context>"),
+    "the notes come before the paper, because the paper outranks them"
+  );
+});
+
+test("earlier turns are left byte-identical", () => {
+  const out = injectMemory(baseMsgs, "<reading_memory>x</reading_memory>");
+  for (let i = 0; i < baseMsgs.length - 1; i++) {
+    assert.equal(out[i], baseMsgs[i], "history must not be rewritten");
+  }
+});
+
+test("no memory means the messages are passed straight through", () => {
+  assert.equal(injectMemory(baseMsgs, null), baseMsgs);
+  const empty = injectMemory([], "<reading_memory>x</reading_memory>");
+  assert.deepEqual(empty, []);
 });

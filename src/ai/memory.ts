@@ -201,6 +201,34 @@ function escapeMarkers(text: string): string {
     .replace(/```/g, "'''");
 }
 
+/**
+ * Fold the memory block into the request.
+ *
+ * It goes into the **user turn**, ahead of the document text, rather than as a
+ * second `system` message. Two reasons, both learned the hard way:
+ *
+ *  - Several OpenAI-compatible gateways (OpenCode among them) validate the role
+ *    sequence and reject a payload with more than one `system` entry — which
+ *    would surface as a 400 on the user's first use of this very feature.
+ *  - One `system` prompt keeps our own instructions in one authoritative place
+ *    instead of splitting them across two messages that later readers have to
+ *    reconcile.
+ *
+ * Before the document text, not after, because the block says "以原文为准": it
+ * is context to be weighed, and the paper outranks it.
+ *
+ * Pure, so the role sequence is directly testable.
+ */
+export function injectMemory(messages: ChatMessage[], block: string | null): ChatMessage[] {
+  if (!block) return messages;
+  if (!messages.length) return messages;
+  const last = messages[messages.length - 1];
+  return [
+    ...messages.slice(0, -1),
+    { role: last.role, content: `${block}\n\n${last.content}` },
+  ];
+}
+
 /** The messages for one chunk request. */
 export function chunkMessages(
   chunk: Chunk,

@@ -28,6 +28,7 @@ import { buildContext, PRESET_PROMPTS } from "./ai/context-builder";
 import {
   buildMemoryDocument,
   chunkMessages,
+  injectMemory,
   memoryContextBlock,
   mergePrompt,
   planChunks,
@@ -416,13 +417,11 @@ async function sendWithMode(question: string, mode: ContextMode): Promise<void> 
     }
   }
 
-  // Reading memory goes in as prior context, ahead of the question but behind
-  // the document text: the paper is the source of truth, the notes are a
-  // previous session's understanding of it.
+  // Reading memory goes in as prior context, folded into the user turn ahead of
+  // the document text — see `injectMemory` for why it is not a second `system`
+  // message.
   const memory = memoryContext();
-  const messages = memory
-    ? [...built.messages.slice(0, -1), { role: "system" as const, content: memory }, built.messages[built.messages.length - 1]]
-    : built.messages;
+  const messages = injectMemory(built.messages, memory);
 
   panel.show();
   renderChat();

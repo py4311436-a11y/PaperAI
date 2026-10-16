@@ -207,6 +207,28 @@ and the right behaviour.
 
 ---
 
+### A-21 — FIXED in 0.5.2: reading memory was sent as a second `system` message
+
+Found while answering "is 阅读笔记 the memory file?" — reviewing what had shipped,
+not a user report.
+
+`main.ts` spliced the `<reading_memory>` block in as its own `system` message
+after the conversation history. That produces a payload with **two `system`
+entries**, and several OpenAI-compatible gateways — OpenCode among them —
+validate the role sequence and reject that. The visible effect would have been a
+400 on the user's first use of exactly the feature we had just built, with a
+message about roles and nothing about memory.
+
+Fixed by `injectMemory()`: the block is folded into the **user turn**, ahead of
+the document text (the paper outranks the notes, and the block already says "以
+原文为准"). One `system` prompt, one authoritative instruction set, and the
+history left byte-identical.
+
+Tests: 5 assertions on the injected shape — exactly one `system` message, the
+role sequence unchanged, no message added or dropped, the notes before the
+document context, earlier turns not rewritten. Negative-controlled: the
+two-system version fails 3 of them.
+
 ### A-18 — FIXED in 0.5.0: Highlight could not be armed on its own; Erase deleted the wrong thing
 
 User-reported 2026-10-16: "highlight 还是没法直接点亮和选择，我用了下发现只有先选中文件再选 highlight 才有用";
