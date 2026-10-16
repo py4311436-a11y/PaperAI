@@ -20,9 +20,28 @@ translate it, with the answer streamed into a side panel.
 git clone <your-remote-url> PaperAI
 cd PaperAI
 npm ci                      # lockfile is committed; use ci, not install
+npm run fixtures            # generates the test PDFs (see below)
 npm run build:release       # bundles the frontend into dist/
 npx tauri build             # produces release/bundle/nsis/PaperAI_<ver>_x64-setup.exe
 ```
+
+### Test PDFs are generated, not committed
+
+`test-pdfs/` and `test-fixtures/` are **not in the repository**. `npm run fixtures`
+creates both; `npm run verify:fixtures` proves the result is usable (page count,
+a non-empty text layer, the awkward filename, no third-party authorship) in about
+a second.
+
+They were real IEEE papers until 2026-10-16. That was fine privately and not fine
+publicly: IEEE licences its papers to the individual subscriber, so committing one
+to a public repository redistributes material the licence does not grant. The
+fixtures in `scripts/make-test-pdfs.mjs` are generated instead and their content
+was written for this purpose. The suites only ever asserted on structure — page
+count, text layer, two-column layout, a Unicode+space path — never on content.
+
+The desktop and PoC suites (`desktop-verify`, `save-safety`, `run-poc`) need
+these files, so run `npm run fixtures` once after cloning. `npm run test:ai` and
+`npm run test:ui` do not.
 
 Prerequisites, all of them:
 
@@ -61,6 +80,14 @@ cd src-tauri && cargo test --lib
 
 `npm run verify:no-profiles` is a guard, not a test: it fails if browser profile
 data or credential files ever reappear in the tree. Run it before committing.
+
+`node scripts/scrub-evidence.mjs` removes the Windows account name and email
+addresses from `evidence/` and `reports/` (they appear in captured Edge/WebView2
+command lines and credential listings). It replaces identity rather than deleting
+the logs, because those logs are the proof trail behind the claims in
+`reports/KNOWN_ISSUES_AI.md`. Run it before publishing; `--check` reports without
+writing. Note that it deliberately **fails** on an API-key pattern instead of
+redacting it — a key in a log means it was live and has to be rotated.
 
 Two suites are deliberately **not** in `npm test`: `tests/windows-integration.mjs`
 installs and uninstalls the app, and `tests/save-safety.mjs` /
