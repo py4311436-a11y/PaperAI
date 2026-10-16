@@ -6,6 +6,18 @@ node_modules/
 # way once.
 dist*/
 target/
+
+# Test PDFs. Both trees are GENERATED, not authored:
+#   test-pdfs/      -> scripts/make-test-pdfs.mjs   (synthetic fixtures)
+#   test-fixtures/  -> scripts/make-fixtures.mjs   (writable copies; it rmSyncs
+#                      and rebuilds the whole directory on every run)
+#
+# They used to be real IEEE papers. Committing them meant redistributing
+# copyrighted material the licence does not grant, and 13 MB of weight for
+# fixtures the tests only ever check structurally. `npm run fixtures` rebuilds
+# both; `npm run verify:fixtures` proves the result is usable.
+test-pdfs/
+test-fixtures/
 # Shipped installers. Deliberately OUTSIDE dist/: tauri.conf.json embeds all of
 # dist/ into the binary, so an installer kept there gets nested into the next one.
 release/

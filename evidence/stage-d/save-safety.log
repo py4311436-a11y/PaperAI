@@ -17,9 +17,9 @@
 [PASS    ] D3.8  目标文件为只读时保存失败且原件不变
             只读属性已设置; 返回 code=save_target_readonly; 原件 SHA 变化=false
 [PASS    ] D3.9  Save As 写入新路径且来源文件不变
-            目标=D:\AIreader\PaperAI-PoC\test-fixtures\save\save-as-target.pdf 字节=490608; 来源 SHA 变化=false
+            目标=%PROJECT_PARENT%\PaperAI-PoC\test-fixtures\save\save-as-target.pdf 字节=490608; 来源 SHA 变化=false
 [PASS    ] D3.10  真实 Save 按钮在失败时保留 dirty 且不损坏原件
-            dirty 前=true 后=true; 原件 SHA 变化=false; 提示="保存失败 [save_target_readonly] 目标文件只读或被占用: D:\AIreader\PaperAI-PoC\test-fixtures\save\target." (attrib rc=0)
+            dirty 前=true 后=true; 原件 SHA 变化=false; 提示="保存失败 [save_target_readonly] 目标文件只读或被占用: %PROJECT_PARENT%\PaperAI-PoC\test-fixtures\save\target." (attrib rc=0)
 [PASS    ] D3.11  拒绝非 PDF 数据且不改目标文件
             返回 code=save_temp_invalid; 目标 SHA 变化=false
 

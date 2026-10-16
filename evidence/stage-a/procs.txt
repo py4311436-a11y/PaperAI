@@ -1,13 +1,13 @@
-﻿15052 :: "C:\Users\py252\AppData\Local\hermes\node\node.exe" ./mcp/server.mjs
-31688 :: "C:\Users\py252\AppData\Local\hermes\node\node.exe" ./start.mjs
-38984 :: "C:\Users\py252\AppData\Local\OpenAI\Codex\runtimes\cua_node\cfb32733c877621e\bin\node.exe"  ./server.mjs
-39056 :: "C:\Users\py252\AppData\Local\OpenAI\Codex\runtimes\cua_node\cfb32733c877621e\bin\node.exe"  ./server.mjs 
-39376 :: C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\node.EXE C:\Users\py252\.workbuddy\plugins\cache\workbuddy-builtin\sheetagent\5.5.6-wb.38337834.g5f969292.h7826dc9400fd/mcp/start.mjs
-41756 :: "C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\node.exe"  C:\Users\py252\.workbuddy\plugins\cache\workbuddy-builtin\weixinpay\1.6.109/dist/mcp-server.mjs
-35872 :: C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\node.exe C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3/node_modules/npm/bin/npm-cli.js run dev
-31776 :: "node"   "D:\AIreader\PaperAI-PoC\node_modules\.bin\\..\vite\bin\vite.js" 
-27900 :: C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\node.exe C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3/node_modules/npm/bin/npm-cli.js run tauri -- build
-46364 :: "node"   "D:\AIreader\PaperAI-PoC\node_modules\.bin\\..\@tauri-apps\cli\tauri.js" build
-21488 :: "C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\\node.exe"  "C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\node_modules\npm\bin\npm-cli.js" run build
-15648 :: "C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\\node.exe"  "C:\Users\py252\.workbuddy\binaries\node\versions\22.22.2-3\node_modules\npm\bin\npm-cli.js" run sync:assets
+﻿15052 :: "%USERPROFILE%\AppData\Local\hermes\node\node.exe" ./mcp/server.mjs
+31688 :: "%USERPROFILE%\AppData\Local\hermes\node\node.exe" ./start.mjs
+38984 :: "%USERPROFILE%\AppData\Local\OpenAI\Codex\runtimes\cua_node\cfb32733c877621e\bin\node.exe"  ./server.mjs
+39056 :: "%USERPROFILE%\AppData\Local\OpenAI\Codex\runtimes\cua_node\cfb32733c877621e\bin\node.exe"  ./server.mjs 
+39376 :: %USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node.EXE %USERPROFILE%\.workbuddy\plugins\cache\workbuddy-builtin\sheetagent\5.5.6-wb.38337834.g5f969292.h7826dc9400fd/mcp/start.mjs
+41756 :: "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node.exe"  %USERPROFILE%\.workbuddy\plugins\cache\workbuddy-builtin\weixinpay\1.6.109/dist/mcp-server.mjs
+35872 :: %USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node.exe %USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3/node_modules/npm/bin/npm-cli.js run dev
+31776 :: "node"   "%PROJECT_PARENT%\PaperAI-PoC\node_modules\.bin\\..\vite\bin\vite.js" 
+27900 :: %USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node.exe %USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3/node_modules/npm/bin/npm-cli.js run tauri -- build
+46364 :: "node"   "%PROJECT_PARENT%\PaperAI-PoC\node_modules\.bin\\..\@tauri-apps\cli\tauri.js" build
+21488 :: "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\\node.exe"  "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node_modules\npm\bin\npm-cli.js" run build
+15648 :: "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\\node.exe"  "%USERPROFILE%\.workbuddy\binaries\node\versions\22.22.2-3\node_modules\npm\bin\npm-cli.js" run sync:assets
 6504 :: node  scripts/sync-pdfjs-assets.mjs

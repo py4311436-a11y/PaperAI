@@ -1,4 +1,4 @@
-﻿found: C:\Users\py252\AppData\Local\PaperAI
+﻿found: %USERPROFILE%\AppData\Local\PaperAI
   paperai.log
 wps processes: 5
 msedge processes: 23

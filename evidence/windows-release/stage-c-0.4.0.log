@@ -8,7 +8,7 @@
 [PASS    ] C1.3  主程序存在且版本与安装包一致
             D:\Program Files\PaperAI\PaperAI.exe  ProductVersion=0.4.0  期望=0.4.0
 [PASS    ] C1.4  开始菜单快捷方式
-            C:\Users\py252\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\PaperAI.lnk
+            %USERPROFILE%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\PaperAI.lnk
 [PASS    ] C1.5  已安装应用/卸载项登记
             PaperAI || "D:\Program Files\PaperAI\uninstall.exe"
 [PASS    ] C2.1  .pdf 关联由安装器原生注册（候选项）
@@ -17,12 +17,12 @@
             安装前=MSEdgePDF 安装后=MSEdgePDF
 [PASS    ] C3.1  命令行打开中文路径 PDF
             进程数=1 窗口标题="PaperAI — IEEE 双栏 论文 副本.pdf"
-                        参数=D:\AIreader\PaperAI-PoC\test-fixtures\dual\IEEE 双栏 论文 副本.pdf
+                        参数=%PROJECT_PARENT%\PaperAI-PoC\test-fixtures\dual\IEEE 双栏 论文 副本.pdf
 [PASS    ] C4.1  二次打开不产生第二个实例
             第一次=1 个进程，第二次后=1 个进程
 [PASS    ] C4.2  现有窗口接收新 PDF（含空格路径）
             窗口标题="PaperAI — 报告 中文 空格 copy.pdf"
-                        参数=D:\AIreader\PaperAI-PoC\test-fixtures\single\报告 中文 空格 copy.pdf
+                        参数=%PROJECT_PARENT%\PaperAI-PoC\test-fixtures\single\报告 中文 空格 copy.pdf
 [PASS    ] C4.3  连续传入多个 PDF 不崩溃/不丢路径
             连发 3 次后进程数=1 标题="PaperAI — 报告 中文 空格 copy.pdf"
 [PASS    ] C5.1  卸载程序执行
@@ -36,4 +36,4 @@
 [PASS    ] C5.5  卸载器原生清理 PaperAI 关联项
             Applications\PaperAI.exe 仍存在=False; OpenWithProgids=removed
 
-17/17 PASS — evidence in D:\AIreader\PaperAI-PoC\evidence\stage-c
+17/17 PASS — evidence in %PROJECT_PARENT%\PaperAI-PoC\evidence\stage-c

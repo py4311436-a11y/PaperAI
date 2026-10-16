@@ -1,4 +1,4 @@
-t+0.0s serving D:\AIreader\PaperAI-PoC\dist at http://127.0.0.1:8099/
+t+0.0s serving %PROJECT_PARENT%\PaperAI-PoC\dist at http://127.0.0.1:8099/
 t+0.6s target: http://127.0.0.1:8099/
 t+0.6s href = "http://127.0.0.1:8099/"
 t+0.6s paperai = "object"

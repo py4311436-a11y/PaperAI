@@ -1,4 +1,4 @@
-arg: D:\AIreader\PaperAI-PoC\test-fixtures\dual\IEEE 双栏 论文 副本.pdf
+arg: %PROJECT_PARENT%\PaperAI-PoC\test-fixtures\dual\IEEE 双栏 论文 副本.pdf
 STATE: {
   "numPages": 6,
   "currentPath": "\\\\?\\D:\\AIreader\\PaperAI-PoC\\test-fixtures\\dual\\IEEE 双栏 论文 副本.pdf",

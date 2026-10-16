@@ -1,6 +1,6 @@
 # S0 — 环境核对、版本快照、Git 基线
 
-日期：2026-10-15 · 工程：`D:\AIreader\PaperAI-PoC` · 本轮目标版本：`0.3.0`
+日期：2026-10-15 · 工程：`%PROJECT_PARENT%\PaperAI-PoC` · 本轮目标版本：`0.3.0`
 
 ---
 
@@ -22,7 +22,7 @@
 | 组件 | 版本 | 来源 |
 |---|---|---|
 | Rust / cargo / rustup | 1.99.0 / 1.99.0 / 1.29.1 | `rustc --version` |
-| MSVC `cl.exe` | 19.44.35229 (v143) | `D:\PaperAI-Build\VS2022BT` |
+| MSVC `cl.exe` | 19.44.35229 (v143) | `%BUILD_ROOT%\VS2022BT` |
 | Windows SDK | 10.0.26100.0 | `C:\Program Files (x86)\Windows Kits\10` |
 | Node / npm | v22.22.2 / 10.9.7 | — |
 | Tauri CLI / tauri / tauri-build | 2.12.2 / 2.12.3 / 2.7.2 | `package.json` / `Cargo.toml` |
@@ -76,7 +76,7 @@
 ```
 --remote-debugging-port            : no      ← 被剥离
 --user-data-dir                    : YES，但值是
-     C:\Users\py252\AppData\Local\com.paperai.desktop\EBWebView   ← 被 WebView2 覆盖
+     %USERPROFILE%\AppData\Local\com.paperai.desktop\EBWebView   ← 被 WebView2 覆盖
 --disable-renderer-backgrounding   : no      ← 同样被剥离
 ```
 

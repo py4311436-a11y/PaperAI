@@ -9,7 +9,7 @@ Report date: 2026-10-14.
 
 | Item | Value |
 |---|---|
-| Working directory | `D:\AIreader\PaperAI-PoC` |
+| Working directory | `%PROJECT_PARENT%\PaperAI-PoC` |
 | `package.json` | present (v0.1.0 → bumped to 0.2.0 in Phase 2) |
 | `src/` | present (`main.ts`, `style.css`, `ink-fixes.css`) |
 | `src-tauri/` | **absent in Phase 1** — created in Phase 2 |
@@ -59,14 +59,14 @@ Raw output: `evidence/stage-a/env.txt`, `evidence/stage-a/env.json`.
 | Component | Location | Notes |
 |---|---|---|
 | rustup / cargo | `D:\.cargo`, `D:\.rustup` | rustup 1.29.1, rustc **1.99.0** |
-| cargo target dir | `D:\PaperAI-Build\target` | via `CARGO_TARGET_DIR` |
-| MSVC v143 | `D:\PaperAI-Build\VS2022BT` | `cl.exe` 19.44.35229 |
+| cargo target dir | `%BUILD_ROOT%\target` | via `CARGO_TARGET_DIR` |
+| MSVC v143 | `%BUILD_ROOT%\VS2022BT` | `cl.exe` 19.44.35229 |
 | Windows 11 SDK | `C:\Program Files (x86)\Windows Kits\10\10.0.26100.0` | **cannot be relocated** (Microsoft limitation) |
 
 Persistent user environment variables were checked first (none of
 `CARGO_HOME` / `RUSTUP_HOME` / `CARGO_TARGET_DIR` were set) and only then added:
 `CARGO_HOME=D:\.cargo`, `RUSTUP_HOME=D:\.rustup`,
-`CARGO_TARGET_DIR=D:\PaperAI-Build\target`, and `D:\.cargo\bin` appended to the
+`CARGO_TARGET_DIR=%BUILD_ROOT%\target`, and `D:\.cargo\bin` appended to the
 **user** `Path` (system `Path` untouched).
 Evidence: `evidence/stage-a/env-vars-check.txt`, `evidence/stage-a/env-vars-set.txt`.
 

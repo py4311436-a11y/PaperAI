@@ -4,5 +4,5 @@ msedgewebview2 procs: 30
 webview2 titles:  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  ||  || 
 port 9401: 0
 --- EBWebView dirs ---
-C:\Users\py252\AppData\Local\EBWebView
+%USERPROFILE%\AppData\Local\EBWebView
 --- com.paperai.app dir ---

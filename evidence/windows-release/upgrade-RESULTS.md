@@ -1,8 +1,8 @@
 # Windows upgrade path — PaperAI_0.2.0_x64-setup.exe -> PaperAI_0.4.1_x64-setup.exe
 
 Generated: 2026-10-15T15:54:37.803Z
-Old: `D:\AIreader\PaperAI-PoC\release\PaperAI_0.2.0_x64-setup.exe`
-New: `D:\AIreader\PaperAI-PoC\release\PaperAI_0.4.1_x64-setup.exe`
+Old: `%PROJECT_PARENT%\PaperAI-PoC\release\PaperAI_0.2.0_x64-setup.exe`
+New: `%PROJECT_PARENT%\PaperAI-PoC\release\PaperAI_0.4.1_x64-setup.exe`
 
 | ID | Check | Result | Notes |
 |---|---|---|---|

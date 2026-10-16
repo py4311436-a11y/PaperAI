@@ -1,4 +1,4 @@
-# PDF.js Compatibility Notes — locked baseline `pdfjs-dist@6.4.299`
+# PDF.js Compatibility Notes — locked baseline `<email>`
 
 Every statement below was produced by reading the actual locked package in this
 repo (`node_modules/pdfjs-dist`) or by running it. Nothing is taken from docs or

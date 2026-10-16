@@ -6,6 +6,8 @@
   "description": "PaperAI — Read · Annotate · Ask. Windows desktop PDF reader (Tauri 2 + PDF.js)",
   "scripts": {
     "sync:assets": "node scripts/sync-pdfjs-assets.mjs",
+    "fixtures": "node scripts/make-test-pdfs.mjs && node scripts/make-fixtures.mjs",
+    "verify:fixtures": "node scripts/verify-test-fixtures.mjs",
     "dev": "npm run sync:assets && vite",
     "build": "npm run sync:assets && tsc --noEmit && vite build",
     "preview": "vite preview --port 4173",

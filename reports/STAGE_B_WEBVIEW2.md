@@ -1,6 +1,6 @@
 # Stage B — PDF core + annotations inside the real Tauri WebView2
 
-**Binary under test:** `D:\PaperAI-Build\target\release\PaperAI.exe`
+**Binary under test:** `%BUILD_ROOT%\target\release\PaperAI.exe`
 (the output of `tauri build`, not the Vite dev server and not headless Edge).
 Raw log: `evidence/stage-b/desktop-verify.log`, table: `evidence/stage-b/RESULTS.md`,
 screenshots: `evidence/stage-b/*.png`.

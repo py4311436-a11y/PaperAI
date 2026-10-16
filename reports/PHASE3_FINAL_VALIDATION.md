@@ -47,7 +47,7 @@ button did nothing.** Root cause and fix in §11. Chasing it surfaced two more
 
 | | |
 |---|---|
-| Path | `D:\AIreader\PaperAI-PoC\release\PaperAI_0.4.0_x64-setup.exe` |
+| Path | `%PROJECT_PARENT%\PaperAI-PoC\release\PaperAI_0.4.0_x64-setup.exe` |
 | Size | 5,000,040 bytes (4.77 MiB) |
 | SHA-256 | `b4cbd6a4004eb1c9649813d2408f752bc5750a4bf6bf02dbf6af95cef7cfab0c` |
 | Built | 2026-10-15 22:33 |
@@ -88,7 +88,7 @@ and `currentPage`, and lost `getSpanRects` (moved into the automation bridge).
 `probe-cdp-*` diagnostics.
 
 Dependencies added: `reqwest` (rustls), `tokio`, `futures-util`, `uuid`,
-`windows` (Credential Manager), `katex@0.16.25` (MIT, bundled locally).
+`windows` (Credential Manager), `<email>` (MIT, bundled locally).
 
 **`pdfjs-dist` is still pinned at exactly `6.4.299`.** Every Phase-2 PDF
 behaviour is unchanged.

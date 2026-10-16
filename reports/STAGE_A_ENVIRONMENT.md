@@ -16,8 +16,8 @@ browser.
 | rustc / cargo | not installed | **rustc 1.99.0**, cargo 1.99.0, rustup 1.29.1 |
 | rustup home | — | `D:\.rustup` |
 | cargo home | — | `D:\.cargo` |
-| cargo target dir | — | `D:\PaperAI-Build\target` |
-| MSVC `cl.exe` | not installed | **19.44.35229** at `D:\PaperAI-Build\VS2022BT\VC\Tools\MSVC\14.44.35207` |
+| cargo target dir | — | `%BUILD_ROOT%\target` |
+| MSVC `cl.exe` | not installed | **19.44.35229** at `%BUILD_ROOT%\VS2022BT\VC\Tools\MSVC\14.44.35207` |
 | Windows SDK | not installed | **10.0.26100.0** |
 | `rc.exe` | not installed | `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe` |
 | Node / npm | v22.22.2 / 10.9.7 | unchanged |

@@ -1,6 +1,6 @@
 [PASS    ] A0  release 可执行文件存在
-            D:\PaperAI-Build\target\release\PaperAI.exe
+            %BUILD_ROOT%\target\release\PaperAI.exe
 [FAIL    ] B0  真实 WebView2 会话
             Error: CDP endpoint never appeared on port 9400
 
-1/2 PASS — evidence in D:\AIreader\PaperAI-PoC\evidence\stage-b
+1/2 PASS — evidence in %PROJECT_PARENT%\PaperAI-PoC\evidence\stage-b

@@ -33,7 +33,7 @@ bugs" and `reports/PDFJS_COMPATIBILITY.md`.
 | 23:45 | `cl.exe` smoke test | printed `paperai-ok 8` |
 | 23:50 | Rust hello-world `cargo build --release` | linked, printed `paperai-rust-link-ok` |
 | 01:00 | persisted `CARGO_HOME` / `RUSTUP_HOME` / `CARGO_TARGET_DIR` + user `Path` (checked nothing existed first) | `evidence/stage-a/env-vars-*.txt` |
-| 01:15 | `npm ci`, `pdfjs-dist@6.4.299` confirmed | — |
+| 01:15 | `npm ci`, `<email>` confirmed | — |
 | 01:20 | `cargo check` on the new `src-tauri` | 3 errors fixed (`Emitter` trait, closure lifetime, `cleanup()` vs `destroy()`) |
 
 ## Stage B — real WebView2

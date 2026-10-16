@@ -1,6 +1,6 @@
 # PaperAI Phase 2 — Final Technical Validation
 
-Date: 2026-10-15 · Project: `D:\AIreader\PaperAI-PoC` · Version: 0.2.0
+Date: 2026-10-15 · Project: `%PROJECT_PARENT%\PaperAI-PoC` · Version: 0.2.0
 
 ---
 
@@ -39,7 +39,7 @@ the app itself is unaffected.
 |---|---|
 | OS | Windows 11 专业版, 10.0.26300, AMD64 |
 | Rust | rustc 1.99.0 / cargo 1.99.0 / rustup 1.29.1, `D:\.rustup`, `D:\.cargo` |
-| MSVC | v143 `cl.exe` 19.44.35229, `D:\PaperAI-Build\VS2022BT` |
+| MSVC | v143 `cl.exe` 19.44.35229, `%BUILD_ROOT%\VS2022BT` |
 | Windows SDK | 10.0.26100.0 — `C:\Program Files (x86)\Windows Kits\10` (cannot be relocated) |
 | Node / npm | v22.22.2 / 10.9.7 |
 | Tauri CLI / tauri / tauri-build | 2.12.2 / 2.12.3 / 2.7.2 |
@@ -104,7 +104,7 @@ Inventory script: `scripts/check-windows-env.ps1` → `evidence/stage-a/env.txt`
 
 | | |
 |---|---|
-| Path | `D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe` |
+| Path | `%PROJECT_PARENT%\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe` |
 | Size | 11,681,450 bytes (11.14 MiB) |
 | SHA-256 | `3f5a840984c851603b9d87232f0f9b77312a62b88a6174133961ccdd26e69635` |
 | Installed to | `%LOCALAPPDATA%\PaperAI\` (currentUser, no elevation) |
@@ -154,9 +154,9 @@ npm ci
 npx vite build                             # frontend only (see K-08)
 npx tauri build --config '{"build":{"beforeBuildCommand":""}}'
 
-node tests/desktop-verify.mjs --exe "D:\PaperAI-Build\target\release\PaperAI.exe" --port 9400
-node tests/save-safety.mjs    --exe "D:\PaperAI-Build\target\release\PaperAI.exe" --port 9700
-node tests/windows-integration.mjs --installer "D:\AIreader\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe"
+node tests/desktop-verify.mjs --exe "%BUILD_ROOT%\target\release\PaperAI.exe" --port 9400
+node tests/save-safety.mjs    --exe "%BUILD_ROOT%\target\release\PaperAI.exe" --port 9700
+node tests/windows-integration.mjs --installer "%PROJECT_PARENT%\PaperAI-PoC\dist\installer\PaperAI_0.2.0_x64-setup.exe"
 node tests/wps-capture.mjs output/annotated-desktop.pdf
 node tests/edge-gui-check.mjs --pdf output/annotated-desktop.pdf
 python tools/inspect_pdf.py output/annotated-desktop.pdf

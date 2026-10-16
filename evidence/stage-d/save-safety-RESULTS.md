@@ -13,6 +13,6 @@ Generated: 2026-10-15T05:48:41.398Z
 | D3.6 | 注入 temp_write（临时文件写入失败） | **PASS** | 返回 code=save_injected_fault; 原件 SHA 变化=false; 残留临时文件=0 个 [] |
 | D3.7 | 注入 replace（替换阶段失败） | **PASS** | 返回 code=save_injected_fault; 原件 SHA 变化=false; 残留临时文件=0 个 [] |
 | D3.8 | 目标文件为只读时保存失败且原件不变 | **PASS** | 只读属性已设置; 返回 code=save_target_readonly; 原件 SHA 变化=false |
-| D3.9 | Save As 写入新路径且来源文件不变 | **PASS** | 目标=D:\AIreader\PaperAI-PoC\test-fixtures\save\save-as-target.pdf 字节=490608; 来源 SHA 变化=false |
-| D3.10 | 真实 Save 按钮在失败时保留 dirty 且不损坏原件 | **PASS** | dirty 前=true 后=true; 原件 SHA 变化=false; 提示="保存失败 [save_target_readonly] 目标文件只读或被占用: D:\AIreader\PaperAI-PoC\test-fixtures\save\target." (attrib rc=0) |
+| D3.9 | Save As 写入新路径且来源文件不变 | **PASS** | 目标=%PROJECT_PARENT%\PaperAI-PoC\test-fixtures\save\save-as-target.pdf 字节=490608; 来源 SHA 变化=false |
+| D3.10 | 真实 Save 按钮在失败时保留 dirty 且不损坏原件 | **PASS** | dirty 前=true 后=true; 原件 SHA 变化=false; 提示="保存失败 [save_target_readonly] 目标文件只读或被占用: %PROJECT_PARENT%\PaperAI-PoC\test-fixtures\save\target." (attrib rc=0) |
 | D3.11 | 拒绝非 PDF 数据且不改目标文件 | **PASS** | 返回 code=save_temp_invalid; 目标 SHA 变化=false |

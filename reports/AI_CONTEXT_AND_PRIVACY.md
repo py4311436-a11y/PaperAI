@@ -46,7 +46,7 @@ detached from its evidence.
 
 ## 3. What is deliberately never sent
 
-* The absolute file path (`C:\Users\…`) — only the display name.
+* The absolute file path (`%USERPROFILE% — only the display name.
 * Your Windows user name.
 * The names of other documents you have open.
 * The PDF file itself, in any form: no base64, no page images, no rendered
