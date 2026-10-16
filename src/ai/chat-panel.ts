@@ -12,8 +12,18 @@
  * already at the bottom. Nothing here touches the PDF's scroll position.
  */
 
-import type { ChatPhase, ChatTurn, ContextMode } from "./types";
-import { renderMarkdown } from "./markdown-renderer";
+import type {
+  ChatPhase,
+  ChatTurn,
+  ContextMode,
+  MemoryFile,
+  ModelOption,
+  ProfileStatus,
+} from "./types";
+import { renderMarkdown } from "./markdown-renderer.js";
+// The explicit `.js` is deliberate: Vite resolves either form, but the Node
+// based unit suite imports this module's compiled output directly, and Node's
+// ESM loader requires a real file extension. Do not "clean" it back.
 
 export interface ChatPanelDeps {
   onSend: (question: string) => void;
@@ -23,6 +33,12 @@ export interface ChatPanelDeps {
   onOpenSettings: () => void;
   onOpenLink: (url: string) => void;
   onCopy: (text: string) => void;
+  /** User picked a different provider; applies to the next send. */
+  onSelectProfile: (profileId: string) => void;
+  /** User picked a different model on the current provider. */
+  onSelectModel: (profileId: string, model: string) => void;
+  /** Build (or rebuild) this document's reading memory. */
+  onGenerateMemory: () => void;
 }
 
 const MODE_LABELS: Record<ContextMode, string> = {
@@ -50,12 +66,21 @@ export class ChatPanel {
   private stopBtn: HTMLButtonElement;
   private modeSelect: HTMLSelectElement;
   private hintEl: HTMLElement;
-  private modelLabel: HTMLElement;
+  private profileSelect: HTMLSelectElement;
+  private modelSelect: HTMLSelectElement;
   private statusEl: HTMLElement;
   private composerBar: HTMLElement;
+  private memoryState!: HTMLElement;
+  private memoryBtn!: HTMLButtonElement;
   /** Which turn is currently streamed as plain text. */
   private liveTurnId: string | null = null;
   private lastRenderedSignature = "";
+  /** Selectors are frozen while a request is in flight. */
+  private busy = false;
+  /** Provider whose model list is currently displayed. */
+  private modelListOwner: string | null = null;
+  /** A memory generation is running; the button must not be re-enterable. */
+  private memoryBusy = false;
 
   constructor(private deps: ChatPanelDeps) {
     this.root = document.createElement("aside");
@@ -68,14 +93,31 @@ export class ChatPanel {
     const title = document.createElement("div");
     title.className = "ai-title";
     title.textContent = "AI";
-    this.modelLabel = document.createElement("span");
-    this.modelLabel.className = "ai-model";
+    // Provider + model pickers. This used to be a read-only text label, which
+    // made the app look locked to whatever the default profile happened to be.
+    this.profileSelect = document.createElement("select");
+    this.profileSelect.id = "ai-profile-select";
+    this.profileSelect.className = "ai-picker";
+    this.profileSelect.title = "选择使用的 AI 服务商（对下一次提问生效）";
+    this.profileSelect.addEventListener("change", () => {
+      const id = this.profileSelect.value;
+      if (id) this.deps.onSelectProfile(id);
+    });
+    this.modelSelect = document.createElement("select");
+    this.modelSelect.id = "ai-model-select";
+    this.modelSelect.className = "ai-picker";
+    this.modelSelect.title = "选择使用的模型（对下一次提问生效）";
+    this.modelSelect.addEventListener("change", () => {
+      const model = this.modelSelect.value;
+      const profileId = this.profileSelect.value;
+      if (model && profileId) this.deps.onSelectModel(profileId, model);
+    });
     const spacer = document.createElement("div");
     spacer.className = "ai-spacer";
     const newBtn = this.iconButton("新对话", "ai-new", () => this.deps.onNewConversation());
     const settingsBtn = this.iconButton("设置", "ai-settings-btn", () => this.deps.onOpenSettings());
     const closeBtn = this.iconButton("×", "ai-close", () => this.hide());
-    header.append(title, this.modelLabel, spacer, newBtn, settingsBtn, closeBtn);
+    header.append(title, this.profileSelect, this.modelSelect, spacer, newBtn, settingsBtn, closeBtn);
 
     // --- context selector
     const ctxRow = document.createElement("div");
@@ -96,6 +138,28 @@ export class ChatPanel {
       this.hintEl.textContent = MODE_HINTS[m];
     });
     ctxRow.append(ctxLabel, this.modeSelect);
+
+    // --- reading memory
+    // Long papers cannot fit in one request, so the app can keep notes about
+    // this document in a file beside it and fold them back into later
+    // questions. Deliberately a row of its own rather than a menu: whether
+    // memory exists changes how every answer is produced, so the user should
+    // see it without opening anything.
+    const memRow = document.createElement("div");
+    memRow.className = "ai-memory";
+    const memLabel = document.createElement("span");
+    memLabel.textContent = "阅读笔记";
+    this.memoryState = document.createElement("span");
+    this.memoryState.className = "ai-memory-state";
+    this.memoryBtn = document.createElement("button");
+    this.memoryBtn.type = "button";
+    this.memoryBtn.id = "ai-memory-generate";
+    this.memoryBtn.className = "ai-mini";
+    this.memoryBtn.textContent = "生成";
+    this.memoryBtn.title =
+      "分块通读全文并生成笔记，保存为 PDF 同目录的 .paperai-notes.md。再次生成会覆盖。";
+    this.memoryBtn.addEventListener("click", () => this.deps.onGenerateMemory());
+    memRow.append(memLabel, this.memoryState, this.memoryBtn);
 
     this.hintEl = document.createElement("div");
     this.hintEl.className = "ai-hint";
@@ -138,7 +202,7 @@ export class ChatPanel {
     this.composerBar.append(this.statusEl, this.stopBtn, this.sendBtn);
     composer.append(this.input, this.composerBar);
 
-    this.root.append(header, ctxRow, this.hintEl, this.transcript, composer);
+    this.root.append(header, ctxRow, memRow, this.hintEl, this.transcript, composer);
   }
 
   private iconButton(label: string, id: string, fn: () => void): HTMLButtonElement {
@@ -179,8 +243,105 @@ export class ChatPanel {
     this.focusInput();
   }
 
-  setModelLabel(text: string): void {
-    this.modelLabel.textContent = text;
+  /**
+   * Rebuild the provider picker.
+   *
+   * Each option carries the display name plus a marker when the key is missing:
+   * "which service am I actually on" is the first question when a request fails,
+   * and a bare `ai_unauthorized` in the transcript answers it far worse than the
+   * header does.
+   */
+  setProviders(profiles: ProfileStatus[], activeId: string | null): void {
+    this.profileSelect.textContent = "";
+    if (!profiles.length) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "未配置 Provider";
+      this.profileSelect.appendChild(o);
+      this.profileSelect.disabled = true;
+      this.setModels(null, [], "");
+      return;
+    }
+    for (const p of profiles) {
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = p.has_key ? p.display_name : `${p.display_name} · 未配置 Key`;
+      o.title = `${p.base_url}\n模型：${p.model}`;
+      this.profileSelect.appendChild(o);
+    }
+    // Keep the caller's choice when it still exists; otherwise fall back to the
+    // first entry. main.ts resolves the default, so this is only a safety net.
+    const next = profiles.some((p) => p.id === activeId) ? (activeId as string) : profiles[0].id;
+    this.profileSelect.value = next;
+    if (this.modelListOwner !== next) {
+      // The provider changed underneath us: show its saved model (marked as
+      // current) until the caller hands us a live catalogue. Never render an
+      // empty model box — that reads as "this provider has no models".
+      this.setModels(next, null, profiles.find((p) => p.id === next)?.model ?? "");
+    }
+    this.profileSelect.disabled = this.busy;
+  }
+
+  /**
+   * Show the model catalogue for `profileId`.
+   *
+   * `models === null` means "not fetched yet": the saved model is shown alone
+   * behind a marker instead. `note` carries a loading/failure reason as a
+   * disabled leading option. The saved model is always present even when the
+   * live list disagrees — a model that is in use must never vanish from the UI.
+   */
+  setModels(
+    profileId: string | null,
+    models: ModelOption[] | null,
+    savedModel: string,
+    note?: string
+  ): void {
+    this.modelListOwner = profileId;
+    this.modelSelect.textContent = "";
+    this.modelSelect.title = "";
+    if (profileId === null) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "—";
+      this.modelSelect.appendChild(o);
+      this.modelSelect.disabled = true;
+      return;
+    }
+    const seen = new Set<string>();
+    const add = (id: string, hint?: string) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const o = document.createElement("option");
+      o.value = id;
+      o.textContent = hint ? `${id}（${hint}）` : id;
+      this.modelSelect.appendChild(o);
+    };
+    if (note) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = note;
+      o.disabled = true;
+      this.modelSelect.appendChild(o);
+    }
+    if (models === null) {
+      if (savedModel) add(savedModel, "当前");
+    } else {
+      for (const m of models) {
+        if (m.compatibility === "incompatible") continue;
+        add(m.id, m.free_hint ? "可能免费" : undefined);
+      }
+      if (savedModel && !seen.has(savedModel)) add(savedModel, "当前（不在列表中）");
+      if (!seen.size && savedModel) add(savedModel, "当前");
+    }
+    if (savedModel) this.modelSelect.value = savedModel;
+    else if (seen.size) this.modelSelect.value = [...seen][0];
+    this.modelSelect.disabled = this.busy;
+  }
+
+  /** Model list being fetched: show the reason inline instead of a stale list. */
+  setModelListNote(profileId: string, note: string, savedModel: string): void {
+    if (this.modelListOwner !== profileId) return;
+    this.setModels(profileId, null, savedModel, note);
   }
 
   setContextMode(mode: ContextMode): void {
@@ -188,9 +349,60 @@ export class ChatPanel {
     this.hintEl.textContent = MODE_HINTS[mode];
   }
 
+  /**
+   * Show what reading memory this document has.
+   *
+   * The state line is the honest bit: whether the notes are being folded into
+   * answers is something the user must be able to see, because it changes what
+   * the model knows without the transcript mentioning it.
+   */
+  setMemoryState(memory: MemoryFile | null): void {
+    this.memoryBusy = false;
+    if (!memory) {
+      this.memoryState.textContent = "无（超长文档可先生成）";
+      this.memoryState.classList.remove("on");
+      this.memoryBtn.textContent = "生成";
+      this.memoryBtn.disabled = false;
+      return;
+    }
+    const bits = [`${(memory.bytes / 1024).toFixed(1)} KB`];
+    if (memory.coveredPages) bits.push(memory.coveredPages);
+    if (memory.updatedAt) bits.push(memory.updatedAt);
+    this.memoryState.textContent = `已启用 · ${bits.join(" · ")}`;
+    this.memoryState.classList.add("on");
+    this.memoryState.title = memory.path;
+    this.memoryBtn.textContent = "重新生成";
+    this.memoryBtn.disabled = false;
+  }
+
+  /** Progress during a (potentially long) multi-request generation. */
+  setMemoryBusy(busy: boolean, detail = ""): void {
+    this.memoryBusy = busy;
+    this.memoryBtn.disabled = busy;
+    if (busy) {
+      this.memoryState.classList.remove("on");
+      this.memoryState.textContent = detail || "正在通读全文…";
+      this.memoryBtn.textContent = "生成中…";
+    } else {
+      this.memoryBtn.textContent = "生成";
+    }
+  }
+
+  /** True while a memory generation is in flight. */
+  isMemoryBusy(): boolean {
+    return this.memoryBusy;
+  }
+
   /** Reflect the state machine in the composer. */
   setPhase(phase: ChatPhase, recordCount: number, messageCount: number): void {
     const busy = phase === "preparing" || phase === "streaming" || phase === "cancelling";
+    // Switching provider/model mid-stream would not affect the in-flight
+    // request, so it would silently lie about what is answering. Freeze both.
+    if (busy !== this.busy) {
+      this.busy = busy;
+      this.profileSelect.disabled = busy || !this.profileSelect.options.length;
+      this.modelSelect.disabled = busy || !this.modelSelect.options.length;
+    }
     this.stopBtn.hidden = !busy || phase === "cancelling";
     this.sendBtn.disabled = busy;
     this.input.disabled = false; // typing is fine; send is what is gated
@@ -280,6 +492,24 @@ export class ChatPanel {
       caret.className = "ai-caret";
       body.appendChild(caret);
     } else if (t.phase === "error") {
+      // A-16: keep whatever arrived before the failure. A truncated answer is
+      // still the model's work, and it is often the part the user needs in order
+      // to judge whether retrying is worth it. Throwing it away and showing only
+      // "timed out" makes a long, mostly-complete answer look like it produced
+      // nothing at all.
+      if (t.content) {
+        const partial = document.createElement("div");
+        partial.className = "ai-partial";
+        try {
+          renderMarkdown(partial, t.content, { onOpenLink: this.deps.onOpenLink });
+        } catch {
+          partial.textContent = t.content;
+        }
+        const note = document.createElement("div");
+        note.className = "ai-note";
+        note.textContent = "以上是中断前已生成的内容";
+        body.append(partial, note);
+      }
       body.appendChild(this.renderError(t));
     } else {
       // Final (or user) content is rendered as markdown.
@@ -369,9 +599,12 @@ export function humanError(code: string | undefined, raw: string | undefined): s
     case "ai_insecure_refused":
       return raw ?? "拒绝向非本机地址使用明文 HTTP，请改用 https://。";
     case "ai_timeout":
-      return "连接超时。请检查网络、代理或 Base URL。";
+      // Prefer the backend's wording: it knows whether the connection failed
+      // outright or dropped mid-answer, and those need different advice. The
+      // generic text is only the fallback.
+      return raw ?? "连接超时。请检查网络、代理或 Base URL。";
     case "ai_first_token_timeout":
-      return "等待模型响应超时。可以重试，或换一个更小的上下文范围。";
+      return raw ?? "等待模型响应超时。可以重试，或换一个更小的上下文范围。";
     case "ai_unauthorized":
       return raw ?? "API Key 无效或没有权限。";
     case "ai_not_found":

@@ -32,11 +32,16 @@ export const DEFAULT_CONTEXT_CHAR_LIMIT = 26_000;
  * Ceiling for `whole-document`. Much larger, because the whole point of that
  * mode is to summarise a paper and a prefix-only summary is worse than useless.
  *
- * ~37k tokens of context: inside every current model's window (DeepSeek V4.1
- * Flash is 1M; most gateways are 128k) with ample room left for the answer.
- * Still a *character* budget so the behaviour does not depend on a tokenizer.
+ * ~50k tokens of context: inside a 64k-token window with room left for the
+ * answer, which covers the great majority of papers in one request. Raised from
+ * 120k on 2026-10-16 at the user's request ("先提高上限，超出再分块").
+ *
+ * Deliberately NOT raised further. Beyond roughly 64k tokens a request fails
+ * outright on gateways with a 64k window, and a hard 400 is a worse answer
+ * than a clearly-labelled truncation plus the chunked path — which is what
+ * `ai/memory.ts` provides for documents past this budget.
  */
-export const DEFAULT_WHOLE_DOCUMENT_CHAR_LIMIT = 120_000;
+export const DEFAULT_WHOLE_DOCUMENT_CHAR_LIMIT = 160_000;
 
 /**
  * Upper bound on pages read in `whole-document`.

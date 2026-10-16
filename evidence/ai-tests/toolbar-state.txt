@@ -1,0 +1,29 @@
+Toolbar tool-state + math delimiters — real Chromium
+Generated: 2026-10-16T08:42:18.876Z
+
+[PASS] T1 初始只有一个按钮亮着
+    lit=["btn-select"]
+[PASS] T2 没有选区时点 Highlight 也能点亮并进入高亮模式
+    lit=["btn-highlight"]  {"toolbarState":"highlight","adapterMode":"highlight","armed":false,"hasSelection":false,"deleted":0}
+[PASS] T2b 有选区时点 Highlight 既高亮又点亮
+    lit=["btn-highlight"]
+[PASS] T3 亮着的按钮在视觉上确实不同（样式生效）
+    active bg=rgb(9, 105, 218)  idle bg=rgb(255, 255, 255)
+[PASS] T4 点 Erase 只是待命，绝不删除已有选中项
+    deleted=0  {"toolbarState":"erase","adapterMode":"ink","armed":true,"hasSelection":true,"deleted":0}
+[PASS] T5 点 Erase 亮的是 Erase 本身，并标记为待命
+    lit=["btn-erase"]  armed=["btn-erase"]
+[PASS] T6 点击空白处不删除（不会误删上一笔）
+    deleted=0  hasSelection=true
+[PASS] T7 点击批注才删除，且可连续删除
+    deleted=2  {"toolbarState":"erase","adapterMode":"ink","armed":true,"hasSelection":false,"deleted":2}
+[PASS] T8 Esc 退出待命，且退出后点击不再删除
+    lit=["btn-select"]  {"toolbarState":"select","adapterMode":"none","armed":false,"hasSelection":false,"deleted":2}
+[PASS] T9 退出擦除后，再点批注不会删除任何东西
+    deleted=2
+[PASS] T10 每个工具按钮都能点亮
+    btn-highlight->["btn-highlight"]  btn-ink->["btn-ink"]  btn-erase->["btn-erase"]  btn-select->["btn-select"]
+[PASS] T11 \[...\] 公式真正被排版，且不残留原始标记
+    katex 节点=1  渲染高度=21px  文本="收敛判据 ∣Tj(k+1)​−Tj(k)​∣<ε 收敛"
+
+12/12 PASS

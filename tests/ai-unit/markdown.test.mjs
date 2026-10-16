@@ -192,6 +192,111 @@ test("block math falls back to literal text when KaTeX is disabled", () => {
   assert.ok(container.textContent.includes("\\int_0^1 x dx"));
 });
 
+/* ------------------------------------------------------------- A-17: \[ \] */
+
+/*
+ * The reported bug: models trained on LaTeX emit `\[ ... \]` for display math,
+ * and this renderer only knew `$$ ... $$` and `\( ... \)`. So the transcript
+ * showed the raw `\[` / `\]` markers and raw commands such as `\varepsilon`,
+ * which is what the screenshot showed.
+ *
+ * These run with KaTeX DISABLED on purpose: with math off the renderer must
+ * still recognise the delimiters and reproduce the formula *without* them, and
+ * that is observable. The "was it typeset" question is answered separately in
+ * the real-browser suite.
+ */
+test("inline \\[...\\] is consumed, not shown as raw markers", () => {
+  const { container } = render("收敛判据 \\[|T_j^{(k+1)} - T_j^{(k)}| < \\varepsilon\\] 收敛");
+  const text = container.textContent;
+  assert.ok(!text.includes("\\["), `raw opening marker leaked: ${text}`);
+  assert.ok(!text.includes("\\]"), `raw closing marker leaked: ${text}`);
+  assert.ok(text.includes("T_j^{(k+1)}"), `the formula itself was lost: ${text}`);
+  assert.ok(text.includes("收敛判据") && text.includes("收敛"), "surrounding prose must survive");
+});
+
+test("block \\[...\\] on its own line becomes a math block", () => {
+  const { container } = render("\\[\n\\varepsilon = \\frac{R}{2L}\n\\]");
+  assert.equal(container.querySelectorAll(".md-math-block").length, 1, "not treated as a math block");
+  assert.ok(!container.textContent.includes("\\["), "raw marker leaked");
+  // The block is not merged into a paragraph.
+  assert.equal(container.querySelectorAll("p").length, 0, "display math must not be a paragraph");
+});
+
+/*
+ * These run with KaTeX DISABLED, which means `renderMath` takes its documented
+ * fallback path: it prints the formula SOURCE, wrapped in `$$...$$`. So the
+ * assertions are about delimiters and structure, never about the LaTeX commands
+ * themselves — `\sqrt` surviving is correct when math is off.
+ *
+ * What is observable, and what the old code got wrong:
+ *   - `\[` / `\]` / `\(` / `\)` markers must never reach the reader;
+ *   - a `$$...$$` pair must produce ONE display-math span and leave no stray
+ *     dollar-sign text behind (the old code emitted the inner `$...$` inline
+ *     plus two orphan "$" characters).
+ *
+ * Whether a formula is actually *typeset* is answered in the real-browser
+ * suite, which runs with math enabled.
+ */
+const textNodes = (root) =>
+  root
+    .allElements()
+    // Text *inside* a math element is the documented math-off fallback
+    // (`$$…$$` around the source) and is supposed to contain dollars. Only text
+    // that escaped the math element counts as stray.
+    .filter((el) => !el.classList.contains("md-math-inline") && !el.classList.contains("md-math-block"))
+    .flatMap((el) => el.childNodes)
+    .filter((n) => n.nodeType === 3)
+    .map((n) => n.textContent);
+
+test("single-line \\[...\\] becomes a math block too", () => {
+  const { container } = render("\\[ F(Y) = \\sqrt{\\sum_i (I_i - I_{meas,i})^2} \\]");
+  assert.equal(container.querySelectorAll(".md-math-block").length, 1, "not treated as a math block");
+  const text = container.textContent;
+  assert.ok(!text.includes("\\["), `raw opening marker leaked: ${text}`);
+  assert.ok(!text.includes("\\]"), `raw closing marker leaked: ${text}`);
+  // The fallback preserves the source; losing it would be worse than showing it.
+  assert.ok(text.includes("\\sqrt"), `the formula source was lost: ${text}`);
+});
+
+test("inline $$...$$ leaves no stray dollar-sign text", () => {
+  const { container } = render("目标函数 $$F(Y) = \\sum_i e_i^2$$ 结束");
+  const stray = textNodes(container).filter((t) => t.includes("$"));
+  assert.deepEqual(
+    stray,
+    [],
+    `stray "$" outside the math element — the $$ pair was parsed as one inline $..$: ${JSON.stringify(stray)}`
+  );
+  const text = container.textContent;
+  assert.ok(text.includes("F(Y) = \\sum_i e_i^2"), `formula lost: ${text}`);
+  assert.ok(text.includes("目标函数") && text.includes("结束"), "prose must survive");
+});
+
+test("inline $$...$$ is marked as display math, not inline math", () => {
+  const { container } = render("a $$x^2$$ b");
+  const spans = container.querySelectorAll(".md-math-inline");
+  assert.equal(spans.length, 1);
+  assert.ok(
+    spans[0].classList.contains("md-math-display"),
+    "a $$...$$ pair is display math even when it sits inside a paragraph"
+  );
+});
+
+test("\\(...\\) keeps working (regression guard for the branch above it)", () => {
+  const { container } = render("行内 \\(\\alpha\\) 结束");
+  const text = container.textContent;
+  assert.ok(!text.includes("\\(") && !text.includes("\\)"), `inline math markers leaked: ${text}`);
+  assert.equal(container.querySelectorAll(".md-math-inline").length, 1);
+  assert.ok(text.includes("行内") && text.includes("结束"), `prose lost: ${text}`);
+});
+
+test("an unclosed \\[ is left as literal text rather than swallowing the rest", () => {
+  const { container } = render("前面 \\[ 未闭合，后面还有文字");
+  assert.ok(
+    container.textContent.includes("后面还有文字"),
+    "an unclosed delimiter must not eat the remainder of the message"
+  );
+});
+
 test("rendering is idempotent and clears previous content", () => {
   const container = dom.doc.createElement("div");
   renderMarkdown(container, "第一次", { math: false });

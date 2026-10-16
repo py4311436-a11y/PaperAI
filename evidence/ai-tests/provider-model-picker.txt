@@ -1,5 +1,5 @@
 Provider model picker — real Chromium
-Generated: 2026-10-15T15:49:39.727Z
+Generated: 2026-10-16T07:51:57.133Z
 
 [PASS] P1 选择预设后基本字段已填充
     base_url=https://opencode.ai/zen/v1

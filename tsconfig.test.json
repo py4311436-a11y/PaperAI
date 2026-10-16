@@ -17,8 +17,11 @@
   "include": [
     "src/ai/context-builder.ts",
     "src/ai/chat-controller.ts",
+    "src/ai/chat-panel.ts",
+    "src/ai/memory.ts",
     "src/ai/markdown-renderer.ts",
     "src/ai/types.ts",
+    "src/tools/erase-policy.ts",
     "tests/ai-unit/run.ts"
   ]
 }

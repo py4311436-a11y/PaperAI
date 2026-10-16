@@ -7,6 +7,7 @@
 
 pub mod client;
 pub mod config;
+pub mod memory;
 pub mod provider;
 pub mod secrets;
 pub mod session;
@@ -22,7 +23,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::error::{codes, AppError};
-use provider::{OpenAiCompatible, Provider};
+use provider::{ChatCall, OpenAiCompatible, Provider};
 use session::SessionRegistry;
 
 /// Managed state: the provider instance, and the cancellation registry.
@@ -163,6 +164,83 @@ pub async fn ai_test_connection(
         p.sends_session_header,
     )
     .await)
+}
+
+/// One complete answer, collected server-side instead of streamed.
+///
+/// Used by the reading-memory pipeline: it must hold the *whole* reply before
+/// writing anything, and a half-received chunk note stored as if it were
+/// complete would poison the notes permanently. It reuses `run_chat` — same
+/// request path, same SSE parser, same timeout rules — and only differs in that
+/// the sink collects instead of forwarding.
+#[tauri::command]
+pub async fn ai_ask_once(
+  state: State<'_, AiState>,
+  profile_id: String,
+  messages: Vec<ChatMessage>,
+) -> Result<String, AppError> {
+  let p = settings::get(&profile_id)?;
+  let (_tx, rx) = tokio::sync::watch::channel(false);
+  let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+  let sink_out = std::sync::Arc::clone(&collected);
+
+  let call = ChatCall {
+    profile_id: p.credential_id.clone(),
+    base_url: p.base_url.clone(),
+    model: p.model.clone(),
+    messages,
+    temperature: None,
+    // A per-call id keeps prompt caching as effective as the chat path's.
+    session_id: Some(format!("paperai-notes-{}", p.id)),
+    send_session_header: p.sends_session_header,
+  };
+
+  {
+    let out = sink_out;
+    let sink = move |ev: AiStreamEvent| {
+      if let AiStreamEvent::Delta { text } = ev {
+        if let Ok(mut s) = out.lock() {
+          s.push_str(&text);
+        }
+      }
+    };
+    provider::run_chat(std::sync::Arc::clone(&state.provider), call, rx, &sink).await;
+  }
+
+  let text = collected.lock().map(|s| s.clone()).unwrap_or_default();
+  if text.trim().is_empty() {
+    return Err(AppError::new(
+      codes::AI_BAD_STREAM,
+      "模型没有返回任何内容，无法生成笔记",
+    ));
+  }
+  Ok(text)
+}
+
+/// The reading-memory sidecar for a document, if it has one.
+///
+/// Takes the *PDF's* path and derives everything else, so the frontend cannot
+/// aim a write at an arbitrary location.
+#[tauri::command]
+pub fn ai_memory_read(pdf_path: String) -> Result<Option<memory::MemoryFile>, AppError> {
+  memory::read_memory(std::path::Path::new(&pdf_path))
+}
+
+/// Replace a document's reading memory with `body`.
+#[tauri::command]
+pub fn ai_memory_write(pdf_path: String, body: String) -> Result<memory::MemoryFile, AppError> {
+  memory::write_memory(std::path::Path::new(&pdf_path), &body)
+}
+
+/// Append one Q&A entry to the reading memory (used after whole-document
+/// answers, so notes accumulate without re-summarising the paper).
+#[tauri::command]
+pub fn ai_memory_append(
+  pdf_path: String,
+  heading: String,
+  entry: String,
+) -> Result<memory::MemoryFile, AppError> {
+  memory::append_entry(std::path::Path::new(&pdf_path), &heading, &entry)
 }
 
 /// Start a streamed completion.

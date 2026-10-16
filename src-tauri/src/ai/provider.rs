@@ -21,11 +21,16 @@ use tokio::sync::watch;
 
 use crate::error::{codes, AppError, AppResult};
 
-use super::client::{self, classify_status, classify_transport, CONNECT_TIMEOUT, FIRST_TOKEN_TIMEOUT};
+use super::client::{self, classify_status, classify_transport, FIRST_TOKEN_TIMEOUT};
 use super::{config, settings};
 use super::secrets;
 use super::stream::{SseEvent, SseParser};
 use super::types::{AiStreamEvent, ChatMessage, ConnectionTest, ModelOption};
+
+/// Total budget for the small, non-streaming helper requests (connection probe,
+/// model catalogue). A whole-exchange deadline is right for those and wrong for
+/// the chat stream — see the A-16 note in `client::build_client`.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(35);
 
 /// A future produced by a provider. Boxed and `Send` so it can be spawned on
 /// the app runtime and outlive the IPC call that started it.
@@ -158,8 +163,30 @@ fn audit_outcome(
 /// Kept separate from the `Channel` so it can be driven end-to-end by the
 /// integration tests (which collect events into a Vec) without a Tauri app.
 /// The `Channel` implementation above is a two-line wrapper.
-pub async fn run_chat<S>(provider: Arc<OpenAiCompatible>, req: ChatCall, mut cancel: watch::Receiver<bool>, sink: &S)
-where
+pub async fn run_chat<S>(
+    provider: Arc<OpenAiCompatible>,
+    req: ChatCall,
+    cancel: watch::Receiver<bool>,
+    sink: &S,
+) where
+    S: Fn(AiStreamEvent) + Send + Sync,
+{
+    run_chat_with_deadlines(provider, req, cancel, sink, FIRST_TOKEN_TIMEOUT).await
+}
+
+/// [`run_chat`] with the stall deadline supplied by the caller.
+///
+/// Exists so the "provider dies mid-answer" test does not have to sit through
+/// the full production deadline. The app always goes through [`run_chat`]; there
+/// is no environment variable and no test-only branch in the request path, so
+/// the tests drive the same loop that ships.
+pub async fn run_chat_with_deadlines<S>(
+    provider: Arc<OpenAiCompatible>,
+    req: ChatCall,
+    mut cancel: watch::Receiver<bool>,
+    sink: &S,
+    stall_timeout: std::time::Duration,
+) where
     S: Fn(AiStreamEvent) + Send + Sync,
 {
     sink(AiStreamEvent::Started);
@@ -176,14 +203,22 @@ where
 
     let payload = build_body(&req.model, &req.messages, req.temperature, true);
 
+    // A-16: NO `.timeout(...)` on this request.
+    //
+    // `RequestBuilder::timeout()` is a *total* deadline covering connect through
+    // the end of the response body, and it overrides the client setting. Putting
+    // `CONNECT_TIMEOUT` (15s) here meant every completion lasting more than 15
+    // seconds was cut off mid-stream and reported as `ai_timeout` — which is how
+    // a whole-document question could show reasoning output and then die at a
+    // suspiciously round 15 s. Stall protection lives in this event loop
+    // instead, where it can distinguish "nothing yet" from "stopped mid-answer".
     let send = with_session(
         provider
             .http
             .post(&target.url)
             .header("Authorization", auth)
             .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")
-            .timeout(CONNECT_TIMEOUT),
+            .header("Accept", "text/event-stream"),
         req.send_session_header,
         req.session_id.as_deref(),
     )
@@ -217,9 +252,10 @@ where
     let mut body = resp.bytes_stream();
     let mut saw_any = false;
 
-    // First-token deadline: measured from the moment the request was accepted,
-    // reset on every chunk so it acts as an idle timeout too.
-    let mut deadline = tokio::time::Instant::now() + FIRST_TOKEN_TIMEOUT;
+    // Stall deadline: measured from the moment the request was accepted, reset
+    // on every chunk so it acts as an idle timeout too. This — not a total
+    // request deadline — is what bounds a hung provider (A-16).
+    let mut deadline = tokio::time::Instant::now() + stall_timeout;
 
     loop {
         tokio::select! {
@@ -233,10 +269,24 @@ where
             }
 
             _ = tokio::time::sleep_until(deadline) => {
-                sink(AiStreamEvent::Error {
-                    code: codes::AI_FIRST_TOKEN_TIMEOUT.to_string(),
-                    safe_message: "等待模型响应超时".to_string(),
-                });
+                // A-16: say WHICH kind of stall this is. Before, a stream that
+                // had already produced text was reported as "waiting for the
+                // model timed out", which is both false and unhelpful: nothing
+                // is being waited for, the answer was cut off. The two cases
+                // have different causes (bad endpoint vs. a gateway dropping a
+                // long response) and the message now reflects that.
+                let (code, msg) = if saw_any {
+                    (
+                        codes::AI_TIMEOUT,
+                        "回答生成到一半被中断（连接在输出过程中停止）。可尝试重试，或改用更小的上下文范围。",
+                    )
+                } else {
+                    (
+                        codes::AI_FIRST_TOKEN_TIMEOUT,
+                        "等待模型响应超时：连接已建立，但一直没有收到内容。请检查 Base URL 与模型名。",
+                    )
+                };
+                sink(AiStreamEvent::Error { code: code.to_string(), safe_message: msg.to_string() });
                 return;
             }
 
@@ -267,7 +317,7 @@ where
                     }
                     Some(Err(e)) => return fail(sink, classify_transport(&e)),
                     Some(Ok(bytes)) => {
-                        deadline = tokio::time::Instant::now() + FIRST_TOKEN_TIMEOUT;
+                        deadline = tokio::time::Instant::now() + stall_timeout;
                         for ev in parser.push(&bytes) {
                             if !apply(ev, &mut saw_any, sink) {
                                 return;
@@ -404,7 +454,10 @@ pub async fn probe_connection(
         http.post(&target.url)
             .header("Authorization", auth)
             .header("Content-Type", "application/json")
-            .timeout(CONNECT_TIMEOUT + std::time::Duration::from_secs(20)),
+            // A total budget is CORRECT here, unlike in `run_chat` (A-16): this
+            // is a single non-streaming 1-token probe that must finish quickly,
+            // so a deadline on the whole exchange is exactly what we want.
+            .timeout(PROBE_TIMEOUT),
         send_session_header,
         // A probe is not a conversation; a fixed id is enough to satisfy the
         // gateway and keeps the request a fair sample of the real ones.
@@ -479,7 +532,9 @@ pub async fn list_models(
     let mut rb = with_session(
         http.get(&url)
             .header("Accept", "application/json")
-            .timeout(CONNECT_TIMEOUT + std::time::Duration::from_secs(20)),
+            // Total budget is correct for a catalogue GET (A-16); the stream in
+            // `run_chat` is the opposite case.
+            .timeout(PROBE_TIMEOUT),
         send_session_header,
         Some("paperai-models"),
     );

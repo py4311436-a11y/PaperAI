@@ -85,6 +85,23 @@ function inline(text: string, opts: RenderOptions): DocumentFragment {
   };
 
   while (i < text.length) {
+    // --- inline display math: $$...$$ on a single line ---
+    //
+    // Checked BEFORE the single-`$` branch on purpose. Without this, `$$x$$`
+    // fell through to the inline rule, which matched the inner `$x$` and left
+    // the outer pair behind as literal "$x$" — a display formula silently
+    // demoted to inline text with stray dollar signs.
+    if (text.startsWith("$$", i)) {
+      const end = text.indexOf("$$", i + 2);
+      if (end > i + 2) {
+        const span = el("span", "md-math-inline md-math-display");
+        renderMath(text.slice(i + 2, end), true, span, opts.math !== false);
+        push(span);
+        i = end + 2;
+        continue;
+      }
+    }
+
     // --- inline math: $...$ or \(...\) ---
     if (text[i] === "$" && text[i + 1] !== "$") {
       const end = text.indexOf("$", i + 1);
@@ -98,9 +115,23 @@ function inline(text: string, opts: RenderOptions): DocumentFragment {
     }
     if (text.startsWith("\\(", i)) {
       const end = text.indexOf("\\)", i + 2);
-      if (end > i) {
+      if (end > i + 2) {
         const span = el("span", "md-math-inline");
         renderMath(text.slice(i + 2, end), false, span, opts.math !== false);
+        push(span);
+        i = end + 2;
+        continue;
+      }
+    }
+    // --- inline display math: \[...\] ---
+    // Models that were trained on LaTeX documents (and most Chinese ones are)
+    // reach for `\[...\]` for display math. We only understood `$$` and
+    // `\(...\)`, so those formulas rendered as raw `\[ \varepsilon \frac` text.
+    if (text.startsWith("\\[", i)) {
+      const end = text.indexOf("\\]", i + 2);
+      if (end > i + 2) {
+        const span = el("span", "md-math-inline md-math-display");
+        renderMath(text.slice(i + 2, end), true, span, opts.math !== false);
         push(span);
         i = end + 2;
         continue;
@@ -298,10 +329,25 @@ export function renderMarkdown(
       continue;
     }
 
-    // --- block math ---
-    if (line.trim().startsWith("$$")) {
+    // --- block math: $$...$$ or \[...\] ---
+    //
+    // `\[ ... \]` is handled alongside `$$ ... $$` because that is what models
+    // actually emit for a formula on its own line. Only recognising `$$` left
+    // the raw `\[` and `\]` markers visible in the transcript.
+    const blockMathDelims: Array<[string, string]> = [
+      ["$$", "$$"],
+      ["\\[", "\\]"],
+    ];
+    const trimmed = line.trim();
+    const mathDelim = blockMathDelims.find(
+      ([open]) => trimmed.startsWith(open) && !(open === "$$" && trimmed === "$$$")
+    );
+    if (mathDelim) {
       flushParagraph(para);
-      const oneLine = line.trim().match(/^\$\$(.+)\$\$$/);
+      const [open, close] = mathDelim;
+      const oneLine = trimmed.match(
+        open === "$$" ? /^\$\$(.+)\$\$$/ : /^\\\[(.+)\\\]$/
+      );
       if (oneLine) {
         const div = el("div", "md-math-block");
         renderMath(oneLine[1], true, div, opts.math !== false);
@@ -311,12 +357,12 @@ export function renderMarkdown(
       }
       const body: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].trim().endsWith("$$")) {
+      while (i < lines.length && !lines[i].trim().endsWith(close)) {
         body.push(lines[i]);
         i++;
       }
       if (i < lines.length) {
-        body.push(lines[i].trim().replace(/\$\$$/, ""));
+        body.push(lines[i].trim().slice(0, lines[i].trim().length - close.length));
         i++;
       }
       const div = el("div", "md-math-block");

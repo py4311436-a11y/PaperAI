@@ -1,0 +1,5 @@
+PaperAI 0.4.2 — cargo test --lib (re-run on this version, not inherited)
+test ai::secrets::sharing_audit::the_scanner_detects_a_planted_key ... ok
+
+test result: ok. 54 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.33s
+

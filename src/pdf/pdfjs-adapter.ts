@@ -335,6 +335,11 @@ export class PdfjsAdapter {
    * Ordering matters (verified): the text must already be selected while in
    * Select mode; we then enter HIGHLIGHT mode (the DOM selection survives the
    * switch) before calling the public `highlightSelection()`.
+   *
+   * Returns how many annotations were **created by this call**, not the total.
+   * Returning the total made the caller treat a failed highlight on a document
+   * that already had highlights as a success — which is how "highlight did
+   * nothing" could still look like it worked.
    */
   async highlightSelection(): Promise<number> {
     if (!this.uiManager) {
@@ -346,19 +351,49 @@ export class PdfjsAdapter {
       this.diagnostics.log("warn", "Highlight: no text selected");
       return 0;
     }
+    const before = this.annotationCount();
     try {
       await this.uiManager.updateMode?.(AnnotationEditorType.HIGHLIGHT, null, true);
       await new Promise((r) => setTimeout(r, 200));
       this.uiManager.highlightSelection();
       await new Promise((r) => setTimeout(r, 350));
-      this.markDirty(true);
-      const n = this.annotationCount();
-      this.diagnostics.log("success", `Highlight created — annotations=${n}`);
-      return n;
+      const made = this.annotationCount() - before;
+      if (made > 0) this.markDirty(true);
+      this.diagnostics.log("success", `Highlight created — +${made} (total=${before + made})`);
+      return made;
     } catch (e) {
       this.diagnostics.log("error", `Highlight failed: ${String(e)}`);
       return 0;
     }
+  }
+
+  /**
+   * Is the viewport point on top of an annotation editor?
+   *
+   * Used to tell "clicked a highlight / ink stroke" from "clicked empty paper",
+   * which is the whole difference between erasing what the user aimed at and
+   * deleting whatever happened to be selected.
+   *
+   * Every editor's root div carries `data-editor-rotation` (see
+   * `AnnotationEditor.render` in the pinned pdfjs-dist), and each editor's own
+   * geometry is drawn inside that div — so walking up from the hit element is
+   * enough. Deliberately does NOT reach into `AnnotationEditorUIManager`'s
+   * private `#editors` map: if a future pdfjs-dist renames the attribute, this
+   * degrades to "no hit detected" and erasing simply stops working, rather than
+   * throwing or deleting the wrong annotation.
+   */
+  isPointOnAnnotation(x: number, y: number): boolean {
+    let node: Element | null = null;
+    try {
+      node = document.elementFromPoint(x, y);
+    } catch {
+      return false;
+    }
+    for (let depth = 0; node && depth < 8; depth++) {
+      if (node.hasAttribute?.("data-editor-rotation")) return true;
+      node = node.parentElement;
+    }
+    return false;
   }
 
   /**

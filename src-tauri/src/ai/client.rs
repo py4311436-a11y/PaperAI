@@ -6,7 +6,8 @@
 //! * Redirects are disabled. Some CDNs redirect a `/chat/completions` to
 //!   another host, and `reqwest` would replay the `Authorization` header to it.
 //!   Turning redirects off makes that impossible rather than merely unlikely.
-//! * Timeouts are explicit and cover connect, first token and idle gaps.
+//! * Timeouts are explicit and cover connect and idle gaps — **never** the total
+//!   duration of the exchange (see [`build_client`] and the A-16 note there).
 
 use std::time::Duration;
 
@@ -19,10 +20,36 @@ pub const FIRST_TOKEN_TIMEOUT: Duration = Duration::from_secs(60);
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Build the shared client. Cheap to clone (it is an `Arc` inside).
+///
+/// # A-16: why there is deliberately no `timeout()` here
+///
+/// `reqwest`'s `ClientBuilder::timeout()` is a **total** deadline — "applied
+/// from when the request starts connecting until the response body has finished"
+/// — and `RequestBuilder::timeout()` overrides it per request. A streamed
+/// completion legitimately runs for minutes: a reasoning model spends its first
+/// half emitting `reasoning_content` before any answer appears, and a
+/// whole-document summary over a long paper is slow by nature.
+///
+/// A total deadline therefore does not protect a stream, it truncates it: the
+/// bytes stop mid-answer and the caller sees a transport timeout while the
+/// provider is behaving perfectly. That is exactly the reported failure — a
+/// whole-document question produced visible reasoning output and then died with
+/// `ai_timeout`, at a suspiciously round ~15 s (see [`CONNECT_TIMEOUT`]).
+///
+/// What actually protects a stream is bounding the *gaps*, not the total:
+/// * `connect_timeout` bounds the TCP/TLS phase;
+/// * `read_timeout` bounds each individual read and resets after every
+///   successful one, so a live-but-slow stream is never cut off;
+/// * `run_chat` additionally enforces its own first-token/idle deadline in the
+///   event loop, where a stalled provider is reported with an actionable code
+///   instead of a generic one.
+///
+/// The exchange as a whole is not bounded, deliberately: the user can always
+/// press stop, and a cap here would be a silent truncation.
 pub fn build_client() -> AppResult<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(IDLE_TIMEOUT)
+        .read_timeout(IDLE_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .user_agent(concat!("PaperAI/", env!("CARGO_PKG_VERSION")))
         // Explicitly keep the default (verified) TLS behaviour.

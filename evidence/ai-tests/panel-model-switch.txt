@@ -1,0 +1,23 @@
+AI panel provider/model pickers — real Chromium
+Generated: 2026-10-16T08:42:30.119Z
+
+[PASS] Q1 头部有 Provider 与模型两个下拉框
+    provider={"tag":"SELECT","w":113,"h":23,"disabled":false}  model={"tag":"SELECT","w":104,"h":23,"disabled":false}
+[PASS] Q2 三个 Provider 都在头部列出，未配置 Key 的有标记
+    options=3  ["DeepSeek（升级前配置）","OpenCode Go（订阅）","OpenCode Zen（含免费模型） · 未配置 Key"]
+[PASS] Q3 在头部切换 Provider 会真正上报（这是被报的问题）
+    select=opencode-go 回调收到=["opencode-go"]
+[PASS] Q4 切换后模型框显示新 Provider 的模型
+    model select=deepseek-v4.1-flash，预期 deepseek-v4.1-flash
+[PASS] Q5 47 个模型进入下拉框：46 个可用 + 当前模型，协议不兼容的被排除
+    options=47（46 可用 + 1 当前），zen-model-03 是否出现=false
+[PASS] Q6 选择模型会上报 providerId 与 model
+    select=zen-model-11 回调收到=[["opencode-go","zen-model-11"]]
+[PASS] Q7 免费模型在面板下拉中也有标记
+    标记数量=7
+[PASS] Q8 生成中两个下拉框都被冻结
+    provider={"tag":"SELECT","w":108,"h":23,"disabled":true}  model={"tag":"SELECT","w":110,"h":23,"disabled":true}
+[PASS] Q9 头部在 380px 面板内不横向溢出
+    header scrollWidth=380 clientWidth=380；panel scrollWidth=380 clientWidth=380
+
+9/9 PASS

@@ -64,6 +64,18 @@ pub fn opencode_go_preset() -> AiProfile {
 }
 
 /// OpenCode Zen — the pay-as-you-go pool, which also carries free models.
+///
+/// Provider-side gate (verified 2026-10-16, user-reported 403 + live probes by
+/// community clients): since ~2026-09-16 the anonymous free lane
+/// (`*-free` models, no API key) rejects every request that does not
+/// originate from the official OpenCode client — `403 FreeTierError:
+/// OpenCode's free tier can only be used from within OpenCode`. Header spoofing
+/// (client UA, `ses_`-shaped session ids, stub tools) worked briefly and has
+/// since been closed server-side; community plugins that did it are deprecated.
+/// Consequence: PaperAI can only use Zen *paid* models with a funded Zen API
+/// key. Free models must be used inside the OpenCode app itself. The preset
+/// still ships with a `-free` default because the id is valid and the server
+/// message (surfaced verbatim in the settings status area) explains the gate.
 pub fn opencode_zen_preset() -> AiProfile {
     AiProfile {
         id: "opencode-zen".into(),

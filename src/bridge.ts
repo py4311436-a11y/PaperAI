@@ -160,6 +160,7 @@ import type {
   AiStreamEvent,
   ChatMessage,
   ConnectionTest,
+  MemoryFile,
   ModelOption,
   ProfileStatus,
 } from "./ai/types";
@@ -200,6 +201,40 @@ export async function aiSaveProfile(profile: AiProfile): Promise<ProfileStatus> 
 
 export async function aiDeleteProfile(id: string, deleteCredential: boolean): Promise<void> {
   await invoke("ai_delete_profile", { id, deleteCredential });
+}
+
+/**
+ * One complete answer, collected in Rust instead of streamed.
+ *
+ * For jobs that must hold the whole reply before acting on it — currently the
+ * reading-memory pipeline, where storing a half-received note would be
+ * permanent damage.
+ */
+export async function aiAskOnce(profileId: string, messages: ChatMessage[]): Promise<string> {
+  return await invoke<string>("ai_ask_once", { profileId, messages });
+}
+
+/**
+ * Reading memory for a document, stored beside the PDF.
+ *
+ * Every call takes the *PDF's* path; Rust derives the sidecar location. There is
+ * deliberately no way to name an arbitrary destination — this writes to a
+ * user's document folder, so the destination must not be caller-chosen.
+ */
+export async function aiMemoryRead(pdfPath: string): Promise<MemoryFile | null> {
+  return await invoke<MemoryFile | null>("ai_memory_read", { pdfPath });
+}
+
+export async function aiMemoryWrite(pdfPath: string, body: string): Promise<MemoryFile> {
+  return await invoke<MemoryFile>("ai_memory_write", { pdfPath, body });
+}
+
+export async function aiMemoryAppend(
+  pdfPath: string,
+  heading: string,
+  entry: string
+): Promise<MemoryFile> {
+  return await invoke<MemoryFile>("ai_memory_append", { pdfPath, heading, entry });
 }
 
 /**

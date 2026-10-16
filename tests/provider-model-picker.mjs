@@ -263,10 +263,36 @@ async function main() {
   let cdp;
   try {
     cdp = await connectCdp(CDP_PORT, `:${PORT}/`);
+
+    // Wait for the module script to have run before touching it.
+    //
+    // `connectCdp` returns as soon as a page target with our URL exists, which
+    // is *before* `<script type="module">` has finished evaluating — so
+    // `window.__t` may still be undefined here. Calling boot() at that moment
+    // threw "Cannot read properties of undefined", which looks like an
+    // application failure but is only a startup race. (Observed once on a
+    // machine with a warm Edge; the run before and the run after both passed.)
+    let booted = false;
+    for (let i = 0; i < 60; i++) {
+      if (await cdp.evaluate("Boolean(window.__t)")) {
+        booted = true;
+        break;
+      }
+      await sleep(250);
+    }
+    if (!booted) {
+      const early = await cdp.evaluate("JSON.stringify(window.__early || [])");
+      const probe = await cdp.evaluate(
+        "import('/provider-settings.js').then(m => 'loaded ' + Object.keys(m).join(','))" +
+          ".catch(e => 'IMPORT FAILED: ' + e)"
+      );
+      throw new Error(`module never evaluated.\n  module probe = ${probe}\n  early errors = ${early}`);
+    }
+
     // Open the dialog and pick a preset, the way the user does.
     await cdp.evaluate("window.__t.boot()");
 
-    // Wait for the module to boot.
+    // Wait for the dialog to finish opening.
     for (let i = 0; i < 60; i++) {
       if (await cdp.evaluate("Boolean(window.__t && window.__t.ready)")) break;
       await sleep(250);

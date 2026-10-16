@@ -207,6 +207,245 @@ and the right behaviour.
 
 ---
 
+### A-18 — FIXED in 0.5.0: Highlight could not be armed on its own; Erase deleted the wrong thing
+
+User-reported 2026-10-16: "highlight 还是没法直接点亮和选择，我用了下发现只有先选中文件再选 highlight 才有用";
+"擦除不是我理解的擦除，这个怎么是直接擦除上一笔，并不是我想要的擦除某一个位置".
+
+**Highlight.** The button ran `doHighlight()`, which only acted when a DOM text
+selection already existed and otherwise warned. It was an *action*, not a mode,
+so it could not be pressed on its own. Now it always enters HIGHLIGHT mode
+first — the button lights, the editor is in highlight mode, and dragging over
+text highlights it — and if there happens to be a selection it highlights that
+too, exactly as before. `highlightSelection()` also had a related defect: it
+returned the document's *total* annotation count, so a failed highlight on a
+document that already had highlights looked like a success. It now returns what
+this call created.
+
+**Erase.** The handler checked for a selection and deleted immediately. PDF.js
+keeps a freshly drawn ink editor selected, so pressing Erase after drawing
+removed *that stroke* — which reads as "it undid my last action" rather than "it
+erases what I point at". PDF.js has no eraser editor and no public per-annotation
+hit test, so the fix is a two-step contract:
+
+1. pressing Erase **arms** it and deletes nothing, ever;
+2. a click inside the page deletes only if it landed on an annotation — decided
+   by `tools/erase-policy.ts`, a pure function whose whole rule set is "armed
+   AND hit an annotation AND PDF.js selected something";
+3. the hit test is a DOM check for `data-editor-rotation`, which every editor's
+   root div carries. It deliberately does not touch `AnnotationEditorUIManager`'s
+   private `#editors` map: if a future pdfjs-dist renames it, erasing degrades
+   to "no hit" instead of throwing or deleting the wrong annotation;
+4. it stays armed after a delete (removing several in a row is the common case),
+   and `Escape` leaves the armed state.
+
+Tests: 6 pure-function assertions including the full truth table (only
+`armed ∧ hit ∧ selected` deletes) and a guard against a future "simplification"
+to `armed && selected`, which is exactly the bug. The real-Chromium suite grew
+to 12 assertions covering "pressing Erase deletes nothing", "a click on empty
+paper deletes nothing (the leftover selection survives)", "clicking annotations
+deletes them, repeatedly", and "after Escape, clicking deletes nothing".
+
+### A-19 — NEW in 0.5.0: per-document reading memory (chunked summarisation)
+
+Requested 2026-10-16: read a paper too long for one request by sending it in
+chunks, keep the notes in a file beside the PDF, and load them next time so the
+memory survives. The user chose: sidecar next to the PDF; both a manual button
+and automatic appends after whole-document answers; raise the single-shot limit
+first and chunk only what still does not fit.
+
+* `whole-document` budget raised 120k → 160k characters (~50k tokens), still
+  inside a 64k window. Deliberately not higher: past ~64k a gateway with a 64k
+  window rejects the request outright, and a hard 400 is worse than a labelled
+  truncation plus the chunked path.
+* `src/ai/memory.ts` plans chunks (pure), asks per chunk for structured notes
+  rather than prose, merges **only the notes** (never re-sending the paper) into
+  one overview, and assembles the sidecar body reproducibly.
+* `src-tauri/src/ai/memory.rs` owns the disk: a marker line identifies files we
+  wrote, and **a target without the marker is refused** so a user's own
+  hand-written `*.paperai-notes.md` is never overwritten. 2 MiB cap; temp-file +
+  rename; oldest Q&A entries are trimmed rather than the write being refused.
+* `ai_ask_once` collects a whole reply in Rust — reusing the streaming provider
+  unchanged — because the pipeline must not store a half-received note as if it
+  were complete.
+* Notes come back as a `<reading_memory>` block framed as *prior background*
+  with "以原文为准", capped at 20k characters, and **structurally escaped**: the
+  note body goes through the same marker-neutralising as document text. The first
+  version did not, and the test caught it — a note containing `</reading_memory>`
+  could have closed the block early and the rest read as instructions.
+* The panel shows a "阅读笔记" row: absent / enabled with size, coverage and
+  time, and a busy state that disables the button so a long run cannot be
+  started twice.
+
+Tests: 11 Rust (path derivation, round trip, foreign-file refusal both ways, size
+cap, append/trim, no stray temp file, timestamp, date conversion), 19 frontend
+(chunk packing: every page exactly once, budget respected, oversized page kept,
+blank pages free, empty document, reproducible document body, context escaping),
+4 panel assertions for the memory row, and 2 real-socket tests that a collected
+answer contains every delta.
+
+### A-17 — FIXED in 0.4.4: formulas showed raw LaTeX; toolbar lit the wrong tool
+
+User-reported 2026-10-16, two symptoms in one round.
+
+**(a) The transcript showed raw LaTeX.** A whole-document answer came out with
+`\[`, `\]`, `\varepsilon`, `\sum_i` visible as literal text, and formulas such
+as `T_j^(k+1)` sat in the prose untypeset. Root cause: the renderer understood
+`$$...$$` and `\(...\)` but **not `\[...\]`**, which is what models trained on
+LaTeX documents actually emit for display math. A second, smaller defect: a
+`$$...$$` pair *inside a line* fell through to the single-`$` inline rule, so it
+rendered as a literal `$x$` — a display formula silently demoted to inline text
+with two orphan `$` characters.
+
+Fixes: `\[...\]` is now recognised both as a block (own line) and inline;
+`$$...$$` inside a paragraph produces one `md-math-display` span and leaves no
+stray dollar text; `$$` is matched before the single-`$` rule for exactly that
+reason. Verified in a real browser with KaTeX enabled — the reported formula
+now renders as `∣Tj(k+1)−Tj(k)∣<ε` with no raw marker.
+
+**(b) The toolbar lied about the active tool.** Three defects, one cause —
+the lit button was written in more than one place, or not at all:
+* `Highlight` ran `doHighlight()` and never touched the indicator, so the user
+  kept looking at a lit **Select** while the editor was in HIGHLIGHT mode;
+* `Erase` had **no `tool` class** in `index.html`, so `setTool`'s
+  `querySelectorAll(".tool")` sweep skipped it and it could never be lit —
+  literally zero buttons active;
+* `Erase` armed itself by entering ink mode, which lit **Draw**: pressing
+  Erase appeared to activate a different tool.
+
+Fixes: one `setToolbarState()` owns the indicator; `erase` is modelled as its
+own toolbar state (it is an action, not a `ToolMode` — PDF.js has no eraser
+editor, deleting needs a selected annotation) and is lit on its own button with
+an extra `armed` style; `doHighlight` reports the mode the editor is actually
+in; `Escape` leaves the armed state, and it stays armed after a delete so
+several annotations can be removed in a row.
+
+Tests: 7 new markdown assertions (delimiters and structure — with KaTeX off the
+renderer *deliberately* prints the formula source, so the tests assert markers
+and element structure, never "no LaTeX commands") and a real-Chromium suite
+(`tests/toolbar-state.mjs`, 8 assertions) that reads the **real** toolbar markup
+out of `index.html` rather than a hand-typed copy.
+
+Negative controls: removing the `\[...\]` support fails 3 markdown assertions
+with exactly the reported symptom (`收敛判据 \[|T_j^{(k+1)}...`); removing the
+`tool` class from Erase and the indicator update from `doHighlight` fails 5 of
+8 browser assertions, with `btn-erase->[]` (no button lights at all).
+
+### A-16 — FIXED in 0.4.3: long answers were cut off at exactly 15 s (user-reported)
+
+User-reported 2026-10-16: a whole-document question on DeepSeek produced visible
+thinking/reasoning output and was then interrupted with `ai_timeout`
+("连接超时。请检查网络、代理或 Base URL。") — while the network was fine.
+
+Root cause: `run_chat` put `.timeout(CONNECT_TIMEOUT)` on the **streaming**
+request. In `reqwest`, `RequestBuilder::timeout()` is a *total* deadline —
+"applied from when the request starts connecting until the response body has
+finished" — and it overrides the client-level setting. `CONNECT_TIMEOUT` is 15 s,
+so **every completion longer than 15 seconds was truncated mid-answer** and
+reported as a transport timeout. The client had the same mistake at a larger
+scale (`.timeout(IDLE_TIMEOUT)` = a 120 s total, not an idle, timeout).
+
+This is inherent to total deadlines on streams: a reasoning model spends its
+first phase emitting `reasoning_content`, and a whole-document summary is slow
+by nature. A total deadline does not protect a stream, it truncates it.
+
+Fixes:
+
+* `client::build_client` no longer sets any total timeout. It uses
+  `connect_timeout` for the TCP/TLS phase and `read_timeout` for each
+  individual read (which resets after every successful read), so a live but
+  slow stream is never cut off.
+* The per-request `.timeout(CONNECT_TIMEOUT)` is gone from `run_chat`. Stall
+  protection lives in the event loop, where it can tell the two failure modes
+  apart: nothing received at all (`ai_first_token_timeout`, "check the Base URL
+  and model") versus output that stopped half-way (`ai_timeout`, "interrupted
+  during generation, retry or use a smaller context"). Before, both said
+  "waiting for the model timed out", which is false in the second case.
+* The exchange as a whole is deliberately unbounded — the user can press stop,
+  and any cap here would be a silent truncation. Documented in the module
+  comment so the next reader does not "fix" it back.
+* `probe_connection` / `list_models` **keep** a total budget (`PROBE_TIMEOUT`):
+  those are small non-streaming requests where a whole-exchange deadline is
+  correct. They now carry a comment saying which case they are, because the
+  distinction is what caused this bug.
+* The frontend no longer discards a partial answer: text that arrived before
+  the failure stays on screen above the error box, marked "以上是中断前已生成的
+  内容". `humanError` now prefers the backend's specific wording for the two
+  timeout codes instead of flattening both into "check your network".
+
+Tests: `a_long_stream_is_not_truncated_mid_answer` drives a real socket against
+a mock that streams 24 chunks at 900 ms (~21 s, never idle for more than a
+second) and asserts all 24 arrive; `a_stream_that_stops_mid_answer_is_reported_
+as_interrupted` asserts the opposite case — content then silence — is reported
+as an interruption and keeps its text. Plus 7 frontend assertions for the
+partial-content and error-wording behaviour.
+
+Negative control: restoring `.timeout(Duration::from_secs(15))` makes the long
+stream test fail **at 15.02 s**, reproducing the user's failure exactly; the
+panel-side control (removing the partial-content block) fails the two frontend
+assertions that cover it.
+
+### A-15 — FIXED in 0.4.2: the panel could not switch provider or model (user-reported)
+
+User-reported 2026-10-16: the AI panel header showed `DeepSeek（升级前配置）· dee…`
+as static text with no way to change it, so the app always answered with whichever
+profile happened to be the default.
+
+Root cause: `ChatPanel` had a `setModelLabel(text)` that wrote a `<span>`. The
+pickers lived only in the settings dialog, and `main.ts` always resolved the
+active profile as `current ?? is_default ?? first`.
+
+Fix:
+
+* The header now carries two real `<select>` elements — `ai-profile-select` and
+  `ai-model-select` — and `setModelLabel` is gone.
+* Switching provider re-points the chat session at that profile; switching model
+  is **persisted through `ai_save_profile`**, because the request path reads the
+  model from the saved profile and an in-memory choice would revert on restart.
+* The model box always keeps the model currently in use, even when the live
+  catalogue omits it (marked `当前（不在列表中）`), filters `incompatible` models,
+  shows a loading/failure note instead of an empty box, and both controls freeze
+  while a request is in flight.
+* `main.ts` caches one catalogue per provider (keyed by base URL, so editing the
+  URL in settings invalidates it) and drops a late reply that lost a provider race.
+
+Tests: 12 DOM-shim unit assertions (`tests/ai-unit/panel-picker.test.mjs`) and 9
+real-Chromium assertions (`tests/panel-model-switch.mjs`, real stylesheet inlined,
+geometry asserted — two pickers plus three buttons must fit the 380px panel).
+Both suites were negative-controlled: removing the change handlers fails 2 of 12,
+and putting the old `<span>` back fails Q1/Q2 in the browser suite.
+
+### A-14 — OPEN (provider-side, not fixable here): Zen free models reject PaperAI with 403 FreeTierError
+
+User-reported 2026-10-16: the `opencode-zen` preset (default model
+`deepseek-v4.1-flash-free`, no API key configured) fails the connection test
+with `403 FreeTierError — OpenCode's free tier can only be used from within
+OpenCode` (`ai_unauthorized`).
+
+This is an **OpenCode server-side policy**, not a PaperAI defect:
+
+* Since ~2026-09-16 the anonymous free lane on `https://opencode.ai/zen/v1`
+  rejects every request that does not originate from the official OpenCode
+  client. Probed gates included client User-Agent, `ses_`-shaped session ids,
+  required `bash`/`read` tool stubs in the body, and caller IP reputation.
+* Third-party clients that spoofed all of those (pi-opencode-zen,
+  dsh-opencode-zen, …) worked briefly; the lane was fully closed to
+  non-official clients by ~2026-09-23 and those plugins are now
+  deprecated/archived by their own maintainers.
+* The paid Zen lane (`zen/v1` with a funded API key) and the OpenCode Go
+  subscription lane (`inference/go/v1`) remain open to external clients —
+  both already work in PaperAI.
+
+Decision: no workaround is implemented. Spoofing a third party's client
+identity to consume its free tier is both against the provider's intent and
+fragile (already proven dead upstream). Users who want free models use them
+inside the OpenCode app; users who want in-app AI use DeepSeek official,
+OpenCode Go (subscription), or a funded Zen key on paid models. The server's
+own message is surfaced verbatim in the settings status area, which is the
+honest explanation. Documented in the `opencode_zen_preset` doc comment.
+
+---
+
 ## Carried over from Phase 2, still open
 
 | ID | Item | Status |

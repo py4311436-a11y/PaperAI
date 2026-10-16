@@ -89,6 +89,17 @@ body {
   color: #fff;
 }
 
+/*
+ * "Armed" — Erase is lit AND waiting for one more click on an annotation.
+ * The dashed ring distinguishes "I am armed" from "I already acted", which is
+ * the difference between a tool the user thinks is broken and a tool that is
+ * telling them what to do next.
+ */
+#toolbar button.armed {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85) inset;
+  border-style: dashed;
+}
+
 #toolbar .sep {
   width: 1px;
   height: 20px;

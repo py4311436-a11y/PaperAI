@@ -32,6 +32,24 @@ export interface ProfileStatus {
   sends_session_header: boolean;
 }
 
+/**
+ * A document's reading memory, as stored beside the PDF.
+ *
+ * `content` never includes the file's marker line: that belongs to the file,
+ * not to the notes. Rust owns the on-disk invariants (the cap, and the refusal
+ * to touch a file it did not write).
+ */
+export interface MemoryFile {
+  path: string;
+  exists: boolean;
+  bytes: number;
+  /** `YYYY-MM-DD HH:MM` of the last write, when it exists. */
+  updatedAt?: string | null;
+  /** e.g. `1–120（共 150 页）` */
+  coveredPages?: string | null;
+  content: string;
+}
+
 /** One entry from a provider's live model catalogue. */
 export interface ModelOption {
   id: string;

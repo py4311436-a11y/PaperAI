@@ -166,6 +166,47 @@ const scenarios = {
 
   /** Never sends anything: used for the first-token timeout. */
   stall: () => ({ status: 200, stall: true, buffers: [] }),
+
+  /**
+   * A-16: a LONG but perfectly healthy stream.
+   *
+   * 24 chunks, one every 900 ms => ~21 s in total, which is well past the
+   * 15 s that `RequestBuilder::timeout(CONNECT_TIMEOUT)` used to impose. This is
+   * the shape of a real reasoning-model answer on a whole document: slow, but
+   * never idle. Any total deadline truncates it; an idle deadline does not.
+   */
+  longHealthy: (model) => ({
+    status: 200,
+    slow: true,
+    makeBuffers: () => {
+      const out = [];
+      for (let i = 1; i <= 24; i++) {
+        out.push(Buffer.from(sseChunk(model, { content: `第${i}段内容。` })));
+      }
+      out.push(Buffer.from("data: [DONE]\n\n"));
+      return out;
+    },
+    gapMs: 900,
+  }),
+
+  /**
+   * A-16: output stops half-way and the connection is then held open forever.
+   *
+   * The provider is not slow here, it is gone: nothing more will ever arrive.
+   * Only a stall/idle deadline can catch this, and the app must say the answer
+   * was interrupted rather than that it never received anything.
+   */
+  stallAfterContent: (model) => ({
+    status: 200,
+    slow: true,
+    makeBuffers: () => [
+      Buffer.from(sseChunk(model, { content: "开头写了一段内容，" })),
+      Buffer.from(sseChunk(model, { content: "然后就断了。" })),
+      // No [DONE], and the socket stays open — the loop must time out.
+    ],
+    gapMs: 300,
+    stallAfterAll: true,
+  }),
 };
 
 /**
@@ -231,20 +272,23 @@ export async function startMockProvider(opts = {}) {
         ...(spec.headers || {}),
       });
 
-      if (spec.slow) {
-        const buffers = spec.makeBuffers();
-        let i = 0;
-        const tick = () => {
-          if (stopped || res.destroyed || i >= buffers.length) {
-            if (!res.destroyed) res.end();
-            return;
-          }
-          res.write(buffers[i++]);
-          setTimeout(tick, spec.gapMs ?? 500);
-        };
-        tick();
-        return;
-      }
+if (spec.slow) {
+      const buffers = spec.makeBuffers();
+      let i = 0;
+      const tick = () => {
+        if (stopped || res.destroyed || i >= buffers.length) {
+          // `stallAfterAll` deliberately keeps the socket open with no further
+          // bytes: that is what a provider dying mid-answer looks like, and the
+          // client's stall deadline is the only thing that can end it.
+          if (!res.destroyed && !spec.stallAfterAll) res.end();
+          return;
+        }
+        res.write(buffers[i++]);
+        setTimeout(tick, spec.gapMs ?? 500);
+      };
+      tick();
+      return;
+    }
 
       for (const b of spec.buffers) res.write(b);
       res.end();

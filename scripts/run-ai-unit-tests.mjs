@@ -46,6 +46,10 @@ console.log("compiled OK");
 const suites = [
   { name: "context + chat controller", file: "dist-test/tests/ai-unit/run.js" },
   { name: "markdown safety", file: "tests/ai-unit/markdown.test.mjs" },
+  { name: "panel provider/model picker", file: "tests/ai-unit/panel-picker.test.mjs" },
+  { name: "interrupted answer (A-16)", file: "tests/ai-unit/interrupted-answer.test.mjs" },
+  { name: "eraser policy (A-18)", file: "tests/ai-unit/erase-policy.test.mjs" },
+  { name: "reading memory chunking (A-19)", file: "tests/ai-unit/memory.test.mjs" },
 ];
 
 const results = [];

@@ -1,6 +1,6 @@
 # Rust provider integration suite (against local Mock SSE)
 
-Generated: 2026-10-15T15:49:24.943Z
+Generated: 2026-10-16T08:41:12.100Z
 Runner: scripts/run-ai-rust-tests.mjs
 
 | Test | Mock scenario | Result | Requests seen by mock |
@@ -24,11 +24,15 @@ Runner: scripts/run-ai-rust-tests.mjs
 | missing_key_fails_before_any_network_call | happy | **PASS** | 0 |
 | plain_http_to_a_remote_host_is_refused | happy | **PASS** | 0 |
 | cancel_stops_the_stream_promptly | slow | **PASS** | 1 |
+| a_long_stream_is_not_truncated_mid_answer | longHealthy | **PASS** | 1 |
+| a_stream_that_stops_mid_answer_is_reported_as_interrupted | stallAfterContent | **PASS** | 1 |
+| a_collected_answer_contains_every_delta | slow | **PASS** | 1 |
+| a_collected_answer_is_empty_when_nothing_arrives | abruptEmpty | **PASS** | 1 |
 | context_is_sent_verbatim_and_nothing_else | happy | **PASS** | 1 |
 | opencode_profiles_send_the_session_header | happy | **PASS** | 1 |
 | ordinary_profiles_do_not_send_the_session_header | happy | **PASS** | 1 |
 
-**22/22 PASS**
+**26/26 PASS**
 
 The mock redacts `Authorization` before recording, so
 `rust-provider-requests.json` is safe to archive as evidence.

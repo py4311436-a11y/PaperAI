@@ -26,6 +26,38 @@ export class ShimNode {
     this.listeners = {};
     this.tabIndex = 0;
     this.hidden = false;
+    if (type === "select") this._installSelectValue();
+  }
+
+  /**
+   * Real `<select>` value semantics: `value` reads the selected option and
+   * writing it moves the selection, rejecting ids that are not in the list.
+   *
+   * Without this, `select.value = "x"` would just create a stray property and a
+   * test could "pass" on a picker that never had that option — which is exactly
+   * the bug class this shim exists to catch.
+   */
+  _installSelectValue() {
+    const optionNodes = () => this.childNodes.filter((c) => c.nodeType === 1 && c.tagName === "OPTION");
+    Object.defineProperty(this, "value", {
+      configurable: true,
+      get() {
+        const opts = optionNodes();
+        const sel = opts.find((o) => o.selected);
+        return (sel ?? opts[0])?.value ?? "";
+      },
+      set(v) {
+        const opts = optionNodes();
+        const hit = opts.find((o) => o.value === v);
+        for (const o of opts) o.selected = o === hit;
+      },
+    });
+    Object.defineProperty(this, "options", {
+      configurable: true,
+      get() {
+        return optionNodes();
+      },
+    });
   }
 
   get textContent() {
@@ -52,6 +84,18 @@ export class ShimNode {
     n.parentNode = this;
     this.childNodes.push(n);
     return n;
+  }
+
+  /** Multi-argument append, as the real DOM has. */
+  append(...nodes) {
+    for (const n of nodes) this.appendChild(n);
+  }
+
+  prepend(...nodes) {
+    for (const n of nodes.reverse()) {
+      n.parentNode = this;
+      this.childNodes.unshift(n);
+    }
   }
 
   removeChild(n) {
@@ -122,10 +166,14 @@ export class ShimNode {
   }
 
   querySelectorAll(sel) {
-    // Only the two selectors the renderer uses.
+    // Class, tag and id selectors — everything the panel and renderer use.
     if (sel.startsWith(".")) {
       const cls = sel.slice(1);
       return this.allElements().filter((e) => e.classList.contains(cls));
+    }
+    if (sel.startsWith("#")) {
+      const id = sel.slice(1);
+      return this.allElements().filter((e) => e.id === id);
     }
     return this.allElements().filter((e) => e.tagName === sel.toUpperCase());
   }

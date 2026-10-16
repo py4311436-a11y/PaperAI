@@ -16,7 +16,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use paperai_lib::ai::provider::{run_chat, ChatCall, OpenAiCompatible};
+use paperai_lib::ai::provider::{run_chat, run_chat_with_deadlines, ChatCall, OpenAiCompatible};
 use paperai_lib::ai::secrets;
 use paperai_lib::ai::types::{AiStreamEvent, ChatMessage};
 
@@ -406,6 +406,127 @@ fn cancel_stops_the_stream_promptly() {
     assert!(matches!(c2.terminal(), Some(AiStreamEvent::Cancelled)));
     // It must not have consumed the whole scripted answer.
     assert!(c2.text().len() < "第一段。第二段。第三段。第四段。".len(), "cancel was too slow");
+}
+
+/// A-19: the memory pipeline needs whole replies, so the collect-in-Rust path
+/// must gather every delta rather than the first one or none.
+///
+/// Exercised against the real mock over a real socket, because the failure this
+/// guards against — storing a half-received chunk note as if it were complete —
+/// would silently corrupt the notes file and every later answer built on it.
+#[test]
+fn a_collected_answer_contains_every_delta() {
+    need_mock!("slow");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    let joined = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let out = std::sync::Arc::clone(&joined);
+    let collector = move |ev: paperai_lib::ai::types::AiStreamEvent| {
+        if let paperai_lib::ai::types::AiStreamEvent::Delta { text } = ev {
+            if let Ok(mut s) = out.lock() {
+                s.push_str(&text);
+            }
+        }
+    };
+    runtime().block_on(run_chat(provider, call(vec![("user", "写笔记")]), rx, &collector));
+
+    let got = joined.lock().unwrap().clone();
+    assert_eq!(
+        got, "第一段。第二段。第三段。第四段。",
+        "a collected answer must be the whole reply, in order"
+    );
+}
+
+/// A-19: an empty stream must not be reported as a usable note.
+#[test]
+fn a_collected_answer_is_empty_when_nothing_arrives() {
+    need_mock!("abruptEmpty");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+    runtime().block_on(run_chat(provider, call(vec![("user", "写笔记")]), rx, &sink));
+    assert_eq!(c.text(), "", "nothing arrived, so nothing may be claimed");
+    assert!(matches!(c.terminal(), Some(AiStreamEvent::Error { .. })));
+}
+
+/// A-16: a long but healthy stream must NOT be truncated.
+///
+/// This is the regression test for the reported bug — a whole-document question
+/// showed reasoning output and then died with `ai_timeout`. The cause was
+/// `RequestBuilder::timeout(CONNECT_TIMEOUT)` on the streaming request: in
+/// reqwest that is a *total* deadline ("from when the request starts connecting
+/// until the response body has finished"), so every completion longer than 15 s
+/// was cut off mid-answer while the provider was behaving perfectly.
+///
+/// The mock streams 24 chunks at 900 ms apart (~21 s). It is never idle for more
+/// than a second, so any *stall* deadline is satisfied — only a total deadline
+/// can kill it. Verified to fail (`ai_timeout`, 16 of 24 chunks) with the old
+/// `.timeout(CONNECT_TIMEOUT)` line restored.
+#[test]
+fn a_long_stream_is_not_truncated_mid_answer() {
+    need_mock!("longHealthy");
+    let _key = with_key();
+    let started = std::time::Instant::now();
+    let c = run(call(vec![("user", "概述这篇论文")]));
+    let elapsed = started.elapsed();
+
+    assert!(
+        matches!(c.terminal(), Some(AiStreamEvent::Completed { .. })),
+        "a slow-but-continuous stream must complete, got {:?}",
+        c.terminal()
+    );
+    // All 24 chunks, i.e. nothing was lost.
+    assert_eq!(c.text().matches('段').count(), 24, "stream was truncated: {:?}", c.text());
+    assert!(elapsed.as_secs() >= 20, "the stream should really have taken ~21s, took {elapsed:?}");
+}
+
+/// A-16: a stream that dies half-way must be reported as an interruption, and
+/// the text that did arrive must survive.
+///
+/// Deliberately paired with the test above: a stall deadline is what protects a
+/// long stream, but without one a dead connection would hang forever. Neither
+/// behaviour may regress at the expense of the other.
+#[test]
+fn a_stream_that_stops_mid_answer_is_reported_as_interrupted() {
+    need_mock!("stallAfterContent");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+    // 2s instead of the production 60s: same loop, same code path, just a
+    // deadline a test can wait for.
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "概述这篇论文")]),
+        rx,
+        &sink,
+        Duration::from_secs(2),
+    ));
+
+    match c.terminal() {
+        Some(AiStreamEvent::Error { code, safe_message }) => {
+            // The content arrived, so this is NOT a first-token timeout, and the
+            // message must not claim we were still waiting for the first token.
+            assert_eq!(code, "ai_timeout", "wrong code: {safe_message}");
+            assert!(
+                !safe_message.contains("一直没有收到内容"),
+                "a mid-answer stall was misreported as never having started: {safe_message}"
+            );
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
+    assert_eq!(
+        c.text(),
+        "开头写了一段内容，然后就断了。",
+        "the partial answer must not be discarded"
+    );
 }
 
 #[test]

@@ -23,14 +23,31 @@ import { ChatController } from "./ai/chat-controller";
 import { ChatPanel, humanError } from "./ai/chat-panel";
 import { ProviderSettings } from "./ai/provider-settings";
 import { SelectionBar } from "./ai/selection-bar";
+import { eraseDecision } from "./tools/erase-policy";
 import { buildContext, PRESET_PROMPTS } from "./ai/context-builder";
+import {
+  buildMemoryDocument,
+  chunkMessages,
+  memoryContextBlock,
+  mergePrompt,
+  planChunks,
+  type ChunkNote,
+  type PageText,
+} from "./ai/memory";
 import {
   captureSelection,
   installSelectionTracking,
   isSnapshotCurrent,
   type SelectionSnapshot,
 } from "./ai/selection-snapshot";
-import type { ContextMode } from "./ai/types";
+import type {
+  AiProfile,
+  ChatMessage,
+  ContextMode,
+  MemoryFile,
+  ModelOption,
+  ProfileStatus,
+} from "./ai/types";
 
 /** Build-time flag. `automation` builds keep the test bridge; releases do not. */
 const IS_AUTOMATION = import.meta.env.VITE_PAPERAI_AUTOMATION === "1";
@@ -137,6 +154,9 @@ const panel = new ChatPanel({
   onOpenSettings: () => void settings.open(),
   onOpenLink: (url) => void openExternal(url),
   onCopy: (text) => void copyText(text),
+  onSelectProfile: (id) => void chooseProfile(id),
+  onSelectModel: (profileId, model) => void chooseModel(profileId, model),
+  onGenerateMemory: () => void generateMemory(),
 });
 
 const chat = new ChatController({
@@ -168,13 +188,134 @@ const selectionBar = new SelectionBar(viewerWrap, {
 });
 
 let activeProfileId: string | null = null;
+/**
+ * The open document's reading memory, if it has one.
+ *
+ * Kept in memory as well as on disk so a follow-up question does not re-read
+ * the file, and so the panel can show the state without awaiting anything.
+ */
+let currentMemory: MemoryFile | null = null;
+/** True while the multi-request memory pipeline is running. */
+let memoryBusy = false;
+
+/** Load the sidecar for a freshly opened document. Never throws. */
+async function loadMemory(pdfPath: string): Promise<void> {
+  try {
+    currentMemory = await bridge.aiMemoryRead(pdfPath);
+  } catch (e) {
+    // A foreign file in the way is worth saying out loud, but it is not a
+    // reason to refuse to open the paper.
+    currentMemory = null;
+    diagnostics.log("warn", `loadMemory: ${String(e)}`);
+  }
+  panel.setMemoryState(currentMemory);
+}
+
+/** The block injected into the next question, or null when there is none. */
+function memoryContext(): string | null {
+  if (!currentMemory?.content?.trim()) return null;
+  return memoryContextBlock(currentMemory);
+}
+let cachedProfiles: ProfileStatus[] = [];
+/**
+ * Live catalogues, keyed by profile id. A catalogue is a network round trip and
+ * provider lists change weekly, so one fetch per provider per app run is the
+ * right trade; the settings dialog still offers an explicit refresh.
+ */
+const modelCatalogues = new Map<string, { baseUrl: string; models: ModelOption[] }>();
+/** Guards against a slow fetch for an abandoned provider overwriting the UI. */
+let modelFetchToken = 0;
+
+function savedModelOf(profileId: string): string {
+  return cachedProfiles.find((p) => p.id === profileId)?.model ?? "";
+}
+
+function describeErr(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (typeof e === "object" && e && "message" in e) return String((e as { message: unknown }).message);
+  return String(e);
+}
+
+/**
+ * Paint the model list for a provider, fetching it at most once.
+ *
+ * The saved model always survives into the list: if the live catalogue disagrees
+ * with what is in use, the in-use model stays visible (marked) instead of being
+ * replaced by a list that does not contain it.
+ */
+async function loadModels(p: ProfileStatus): Promise<void> {
+  const token = ++modelFetchToken;
+  const cached = modelCatalogues.get(p.id);
+  if (cached && cached.baseUrl === p.base_url) {
+    panel.setModels(p.id, cached.models, savedModelOf(p.id));
+    return;
+  }
+  panel.setModelListNote(p.id, "正在拉取模型列表…", savedModelOf(p.id));
+  try {
+    const models = await bridge.aiListModels(p.base_url, p.id, p.sends_session_header);
+    if (token !== modelFetchToken || activeProfileId !== p.id) return;
+    modelCatalogues.set(p.id, { baseUrl: p.base_url, models });
+    panel.setModels(p.id, models, savedModelOf(p.id));
+  } catch (e) {
+    if (token !== modelFetchToken || activeProfileId !== p.id) return;
+    const msg = describeErr(e);
+    diagnostics.log("warn", `loadModels(${p.id}): ${msg}`);
+    panel.setModelListNote(p.id, `拉取失败：${msg}`, savedModelOf(p.id));
+  }
+}
+
+/** User picked a different provider from the panel header. */
+async function chooseProfile(id: string): Promise<void> {
+  if (id === activeProfileId) return;
+  const p = cachedProfiles.find((x) => x.id === id);
+  if (!p) return;
+  activeProfileId = id;
+  chat.setProfileId(id);
+  panel.setProviders(cachedProfiles, id);
+  await loadModels(p);
+}
+
+/**
+ * User picked a different model from the panel header.
+ *
+ * Persisted to the profile, not kept in memory: the request path reads the model
+ * from the saved profile, so an in-memory choice would silently revert on the
+ * next launch.
+ */
+async function chooseModel(profileId: string, model: string): Promise<void> {
+  const p = cachedProfiles.find((x) => x.id === profileId);
+  if (!p || p.model === model) return;
+  const profile: AiProfile = {
+    id: p.id,
+    display_name: p.display_name,
+    base_url: p.base_url,
+    model,
+    credential_id: p.id,
+    is_default: p.is_default,
+    sends_session_header: p.sends_session_header,
+  };
+  try {
+    const saved = await bridge.aiSaveProfile(profile);
+    Object.assign(p, saved);
+    panel.setModels(profileId, modelCatalogues.get(profileId)?.models ?? null, model);
+    diagnostics.log("info", `model switched: profile=${profileId} model=${model}`);
+  } catch (e) {
+    const msg = describeErr(e);
+    diagnostics.log("warn", `chooseModel(${profileId}): ${msg}`);
+    // Snap the picker back to what is actually saved, so the header cannot
+    // claim a model the next request will not use.
+    panel.setModels(profileId, modelCatalogues.get(profileId)?.models ?? null, p.model, `切换失败：${msg}`);
+    toast(`切换模型失败：${msg}`, "error");
+  }
+}
 
 async function refreshProfileState(): Promise<void> {
   try {
     const list = await bridge.aiListProfiles();
+    cachedProfiles = list;
     if (!list.length) {
       activeProfileId = null;
-      panel.setModelLabel("未配置");
+      panel.setProviders(list, null);
       return;
     }
     // Keep the current choice if it still exists; otherwise take the default.
@@ -184,7 +325,8 @@ async function refreshProfileState(): Promise<void> {
       list[0];
     activeProfileId = chosen.id;
     chat.setProfileId(chosen.id);
-    panel.setModelLabel(`${chosen.display_name} · ${chosen.model}${chosen.has_key ? "" : " · 未配置 Key"}`);
+    panel.setProviders(list, chosen.id);
+    void loadModels(chosen);
   } catch (e) {
     diagnostics.log("warn", `refreshProfileState: ${String(e)}`);
   }
@@ -226,9 +368,18 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function doHighlight(): Promise<void> {
-  const n = await adapter.highlightSelection();
-  if (n > 0) setDirty(true);
-  else toast("请先在选择模式下选中一段文字", "warn");
+  // Enter highlight mode FIRST, unconditionally, so the button lights up and
+  // the user can drag over text straight away. This used to run only when a
+  // selection already existed, which is why the button could not be pressed on
+  // its own: it was an action, not a mode.
+  await setTool("highlight");
+  const made = await adapter.highlightSelection();
+  if (made > 0) {
+    setDirty(true);
+  } else {
+    // Not a warning: the mode is now armed, this is what to do next.
+    toast("已进入高亮模式：在 PDF 中拖选文字即可高亮", "info");
+  }
 }
 
 /** Build the context and send. Shared by presets and free-form questions. */
@@ -265,15 +416,55 @@ async function sendWithMode(question: string, mode: ContextMode): Promise<void> 
     }
   }
 
+  // Reading memory goes in as prior context, ahead of the question but behind
+  // the document text: the paper is the source of truth, the notes are a
+  // previous session's understanding of it.
+  const memory = memoryContext();
+  const messages = memory
+    ? [...built.messages.slice(0, -1), { role: "system" as const, content: memory }, built.messages[built.messages.length - 1]]
+    : built.messages;
+
   panel.show();
   renderChat();
-  await chat.send({
+  const turnId = await chat.send({
     question,
-    messages: built.messages,
-    contextLabel: built.label,
+    messages,
+    contextLabel: memory ? `${built.label} · 含阅读笔记` : built.label,
     stats: built.stats,
   });
   renderChat();
+
+  // Auto-append for whole-document questions only: those are the ones whose
+  // answers are worth keeping, and they are rare enough that a disk write per
+  // question is not a nuisance.
+  if (turnId && mode === "whole-document") {
+    void appendMemoryFromTurn(question, turnId);
+  }
+}
+
+/**
+ * Append a finished whole-document exchange to the reading memory.
+ *
+ * Best effort and silent on failure: the answer is already on screen, and a
+ * write problem (read-only folder, sync conflict, foreign file in the way)
+ * must not turn a good answer into an error state.
+ */
+async function appendMemoryFromTurn(question: string, turnId: string): Promise<void> {
+  if (!currentPath) return;
+  try {
+    const answer = chat.turns().find((t) => t.id === turnId)?.content ?? "";
+    if (!answer.trim()) return;
+    const when = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    const heading = `${when.getFullYear()}-${p(when.getMonth() + 1)}-${p(when.getDate())} ${p(when.getHours())}:${p(when.getMinutes())} · ${question.slice(0, 24)}`;
+    // A digest, not the whole answer: the memory file is context for later
+    // questions, and a full transcript would crowd out the notes.
+    const entry = `**问：** ${question}\n\n**答：** ${answer.slice(0, 1200).trim()}`;
+    currentMemory = await bridge.aiMemoryAppend(currentPath, heading, entry);
+    panel.setMemoryState(currentMemory);
+  } catch (e) {
+    diagnostics.log("warn", `appendMemoryFromTurn: ${String(e)}`);
+  }
 }
 
 async function askWithPreset(which: "explain" | "translate"): Promise<void> {
@@ -351,6 +542,9 @@ async function openPath(rawPath: string): Promise<boolean> {
     adapter.markClean();
     toast(`已打开 ${info.name}`, "success");
     renderChat();
+    // Reading memory is loaded after the document so the panel can show its
+    // state immediately; a failure here must never block opening the PDF.
+    void loadMemory(info.path);
     return true;
   } catch (e) {
     diagnostics.log(
@@ -451,14 +645,152 @@ async function onSaveAs() {
   await saveTo(null);
 }
 
-/* ================================================================= tools == */
+/**
+ * Read the whole paper in chunks and write the notes beside the PDF.
+ *
+ * This is the fallback for a document too long for one request. It is
+ * deliberately sequential: chunks are sent one at a time, so peak memory and
+ * rate-limit pressure stay flat, and a failure half-way leaves the previously
+ * saved notes untouched (nothing is written until every chunk has answered).
+ *
+ * Cost is real — one request per chunk plus a merge — so it is user-initiated.
+ */
+async function generateMemory(): Promise<void> {
+  if (!currentPath) {
+    toast("未打开文档", "warn");
+    return;
+  }
+  if (!activeProfileId) {
+    toast("请先在设置中配置 AI Provider", "warn");
+    void settings.open();
+    return;
+  }
+  if (chat.isBusy() || memoryBusy) {
+    toast("请等待当前操作完成", "warn");
+    return;
+  }
+
+  memoryBusy = true;
+  panel.setMemoryBusy(true);
+  const total = adapter.numPages;
+  try {
+    // Collect the pages first; the chunker needs them all to plan boundaries.
+    const all: PageText[] = [];
+    for (let p = 1; p <= total; p++) {
+      const text = await adapter.getPageText(p);
+      all.push({ page: p, text: text ?? "" });
+      if (p % 20 === 0) {
+        panel.setMemoryBusy(true, `正在读取第 ${p}/${total} 页…`);
+      }
+    }
+
+    const chunks = planChunks(all);
+    if (!chunks.length) {
+      toast("这份 PDF 没有可提取的文字，无法生成笔记", "warn");
+      return;
+    }
+
+    const notes: ChunkNote[] = [];
+    for (const [i, chunk] of chunks.entries()) {
+      panel.setMemoryBusy(true, `正在生成笔记 ${i + 1}/${chunks.length}（第 ${chunk.from}–${chunk.to} 页）…`);
+      const text = await askOnce(chunkMessages(chunk, total));
+      if (!text.trim()) {
+        toast(`第 ${chunk.from}–${chunk.to} 页没有得到内容，已停止（未覆盖原有笔记）`, "error");
+        return;
+      }
+      notes.push({ from: chunk.from, to: chunk.to, note: text });
+    }
+
+    panel.setMemoryBusy(true, "正在合并全文概要…");
+    const overview = await askOnce([
+      {
+        role: "user",
+        content: mergePrompt(notes, total),
+      },
+    ]);
+
+    const profile = cachedProfiles.find((p) => p.id === activeProfileId);
+    const body = buildMemoryDocument({
+      docTitle: currentName || "未命名文档",
+      model: profile?.model ?? "未知模型",
+      totalPages: total,
+      notes,
+      overview,
+      now: new Date(),
+    });
+    currentMemory = await bridge.aiMemoryWrite(currentPath, body);
+    panel.setMemoryState(currentMemory);
+    toast(
+      `阅读笔记已保存：${chunks.length} 段 · ${currentMemory.path}`,
+      "success"
+    );
+  } catch (e) {
+    const msg = String(e);
+    diagnostics.log("error", `generateMemory: ${msg}`);
+    toast(`生成阅读笔记失败：${msg}`, "error");
+  } finally {
+    memoryBusy = false;
+    panel.setMemoryBusy(false);
+  }
+}
+
+/**
+ * One complete answer, no streaming.
+ *
+ * Used by the memory pipeline, which needs finished text before it can store
+ * anything. It still goes through the normal streaming provider underneath —
+ * only the presentation differs — so there is one request path, one SSE parser
+ * and one set of timeout rules to reason about.
+ */
+async function askOnce(messages: ChatMessage[]): Promise<string> {
+  if (!activeProfileId) throw new Error("未配置 AI Provider");
+  return await bridge.aiAskOnce(activeProfileId, messages);
+}
+
+/**
+ * The toolbar indicator, driven from ONE place.
+ *
+ * Every bug here was the same bug: the lit button was written somewhere else
+ * (or not at all), so it described a mode the app was not in.
+ *   - Highlight ran `doHighlight()` and never touched the indicator, so the
+ *     user stayed looking at a lit "Select" while the editor was in HIGHLIGHT.
+ *   - Erase had no `tool` class at all, so it could never be lit.
+ *   - Erase armed itself by entering ink mode, which lit **Draw** — pressing
+ *     Erase appeared to light a different tool, i.e. a dead button.
+ *
+ * `erase` is not a `ToolMode`: PDF.js has no eraser editor, deleting requires
+ * an annotation to be selected. It is a user-facing *action* that borrows ink
+ * mode only so the annotation layer becomes hit-testable, which is why it is
+ * tracked separately here and lit on its own button.
+ */
+type ToolbarState = "select" | "highlight" | "ink" | "erase";
+let toolbarState: ToolbarState = "select";
+/** True while the eraser is waiting for a click on an annotation. */
+let eraseArmed = false;
+
+function setToolbarState(next: ToolbarState): void {
+  toolbarState = next;
+  if (next !== "erase") eraseArmed = false;
+  document.querySelectorAll(".tool").forEach((b) => b.classList.remove("active", "armed"));
+  const btn = $(`#btn-${next}`);
+  btn.classList.add("active");
+  // "armed" is the extra signal that erase is waiting for you to click an
+  // annotation, as opposed to Select/Draw/Highlight which act immediately.
+  if (next === "erase") btn.classList.add("armed");
+}
 
 async function setTool(tool: ToolMode) {
-  document.querySelectorAll(".tool").forEach((b) => b.classList.remove("active"));
-  $(`#btn-${tool === "ink" ? "ink" : tool}`).classList.add("active");
+  setToolbarState(tool);
   await adapter.setTool(tool);
   // The selection bar must not appear over drawing/erasing.
   if (tool !== "select") selectionBar.hide();
+}
+
+/** Leave the armed-erase state without touching the document. */
+function exitEraseArmed(): void {
+  if (!eraseArmed) return;
+  eraseArmed = false;
+  void setTool("select");
 }
 
 /* ================================================================ wiring == */
@@ -468,16 +800,55 @@ $("#btn-select").addEventListener("click", () => void setTool("select"));
 $("#btn-highlight").addEventListener("click", () => void doHighlight());
 $("#btn-ink").addEventListener("click", () => void setTool("ink"));
 $("#btn-erase").addEventListener("click", async () => {
-  // PDF.js only makes the editor layer hit-testable while an editing mode is
-  // active, so selecting one of our own annotations requires entering a mode.
-  if (!adapter.debugState().hasSelection) {
-    await setTool("ink");
-    toast("已进入批注编辑模式：点击要删除的批注，再点 Erase", "info");
-    return;
-  }
-  const ok = adapter.deleteSelected();
-  if (ok) setDirty(true);
-  else toast("没有选中的批注可删除", "info");
+  // Arming deletes NOTHING. The old code checked for a selection here and
+  // deleted immediately — and because PDF.js keeps a freshly drawn ink editor
+  // selected, pressing Erase after drawing removed that stroke. The user read
+  // that as "it erases my last action" rather than "it erases what I click".
+  //
+  // Ink mode is entered only so the annotation layer becomes hit-testable (PDF.js
+  // has no eraser editor); the toolbar lights ERASE, never Draw.
+  await adapter.setTool("ink");
+  eraseArmed = true;
+  setToolbarState("erase");
+  selectionBar.hide();
+  toast("擦除模式：点击要删除的批注（Esc 或点 Select 退出）", "info");
+});
+
+/**
+ * "Click where you want it gone".
+ *
+ * PDF.js owns the hit testing: a click on an editor selects it. We only decide
+ * whether that click is allowed to delete, and we require the pointer to have
+ * landed on an annotation — see `tools/erase-policy.ts` for why that matters.
+ *
+ * The delete is deferred by one frame because PDF.js applies the selection in
+ * its own pointer handling, which can run after this listener.
+ */
+viewerWrap.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (!eraseArmed) return;
+    const hit = adapter.isPointOnAnnotation(e.clientX, e.clientY);
+    requestAnimationFrame(() => {
+      const decision = eraseDecision({
+        armed: eraseArmed,
+        hitAnnotation: hit,
+        hasSelection: !!adapter.debugState().hasSelection,
+      });
+      if (decision !== "delete") return;
+      if (adapter.deleteSelected()) {
+        setDirty(true);
+        // Stay armed: removing several annotations in a row is the common case.
+        setToolbarState("erase");
+      }
+    });
+  },
+  true
+);
+document.addEventListener("keydown", (e) => {
+  // Escape is the conventional "cancel what I armed" key, and armed-erase is
+  // the one toolbar state that waits for a further click.
+  if (e.key === "Escape") exitEraseArmed();
 });
 $("#btn-save").addEventListener("click", () => void onSave());
 $("#btn-save-as").addEventListener("click", () => void onSaveAs());
@@ -705,6 +1076,10 @@ if (IS_AUTOMATION) {
       },
       get dirty() {
         return dirty;
+      },
+      /** Which toolbar button is lit, and whether the eraser is armed. */
+      get toolbar() {
+        return { state: toolbarState, eraseArmed };
       },
       get currentPath() {
         return currentPath;

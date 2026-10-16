@@ -1,6 +1,6 @@
-# AI test matrix — PaperAI 0.4.1
+# AI test matrix — PaperAI 0.5.0
 
-Generated: 2026-10-15 · Branch `ai-integration` · Version `0.4.1`
+Generated: 2026-10-16 · Branch `ai-integration` · Version `0.5.0`
 
 Every status below is the outcome of a run recorded in `evidence/`. Where a
 check could not be run, it says **BLOCKED** and names the blocker — never PASS.
@@ -11,24 +11,33 @@ check could not be run, it says **BLOCKED** and names the blocker — never PASS
 source scripts/env.sh
 
 # Rust: streaming, provider, secrets, recovery, SSE
-cd src-tauri && cargo test --lib              # 54 assertions
+cd src-tauri && cargo test --lib              # 65 assertions
 cargo test --test save_crash_recovery         # 8 assertions
 
 # Rust against a real local Mock SSE server (real socket, real SSE bytes)
-node scripts/run-ai-rust-tests.mjs            # 22 assertions
+node scripts/run-ai-rust-tests.mjs            # 26 assertions
 
-# Frontend logic (context, state machine, markdown safety)
-node scripts/run-ai-unit-tests.mjs            # 53 assertions
+# Frontend logic (context, state machine, markdown safety, panel pickers,
+# interrupted answers)
+node scripts/run-ai-unit-tests.mjs            # 108 assertions
 
 # Overlay visibility — REAL chromium, getComputedStyle over CDP (A-12)
 # Needs a built stylesheet: run `node scripts/build.mjs --release` first.
 node tests/overlay-visibility.mjs             # 15 assertions
 
 # Model picker in the settings dialog — real Chromium, real click/selection
-node tests/provider-model-picker.mjs# 10 assertions
+node tests/provider-model-picker.mjs          # 10 assertions
+
+# Panel header provider/model pickers — real Chromium, real stylesheet, real
+# change events, plus rendered geometry (A-15)
+node tests/panel-model-switch.mjs             # 9 assertions
+
+# Toolbar tool-state + math delimiters — real Chromium. Reads the REAL toolbar
+# markup out of index.html, so a regression there fails the suite (A-17)
+node tests/toolbar-state.mjs                 # 12 assertions
 
 # Windows integration (installed app, native window title as the observable)
-node tests/windows-integration.mjs --installer release/PaperAI_0.4.1_x64-setup.exe
+node tests/windows-integration.mjs --installer release/PaperAI_0.5.0_x64-setup.exe
 
 # Upgrade path: oldest -> newest in release/ (currently 0.2.0 -> 0.3.1)
 node tests/windows-upgrade.mjs
@@ -38,7 +47,31 @@ node scripts/build.mjs --release && node scripts/verify-release-bundle.mjs dist
 node scripts/build.mjs --automation && node scripts/verify-release-bundle.mjs dist --expect-present
 ```
 
-**Totals: 192 automated assertions green. 4 BLOCKED, 4 PARTIAL.**
+**Totals: 273 automated assertions green. 4 BLOCKED, 4 PARTIAL.**
+
+> 0.5.0 delta vs 0.4.4: +35 assertions. Two new frontend suites (6 eraser-policy,
+> 19 reading-memory, 4 memory-row) and 4 panel assertions, plus 11 Rust memory
+> tests and 2 real-socket tests that a collected answer contains every delta.
+> One of those 19 caught a real defect while being written: the memory block was
+> injected **without** structural escaping, so a note containing
+> `</reading_memory>` could close the block early.
+>
+> 0.4.4 delta vs 0.4.3: +15 assertions — 7 markdown/math-delimiter assertions
+> and a new 8-assertion real-Chromium toolbar suite. Both are negative-controlled:
+> dropping the `\[...\]` support fails 3 markdown assertions with exactly the
+> reported raw-marker symptom, and removing the `tool` class from Erase plus the
+> indicator update in `doHighlight` fails 5 of 8 browser assertions
+> (`btn-erase->[]`, i.e. no button lights at all).
+>
+> 0.4.3 delta vs 0.4.2: +9 assertions. The Rust provider suite gains the two
+> A-16 tests — a 21 s stream that must arrive complete, and a stream that dies
+> half-way that must be reported as an interruption with its text kept — plus
+> the frontend suite gains 7 for the partial-content and error-wording
+> behaviour. The long-stream test is negative-controlled: restoring the 15 s
+> `.timeout(...)` makes it fail at 15.02 s, reproducing the reported bug.
+>
+> 0.4.2 delta vs 0.4.1: +21 frontend assertions (12 panel-picker unit + 9 panel
+> real-Chromium) and +1 new suite.
 
 ---
 

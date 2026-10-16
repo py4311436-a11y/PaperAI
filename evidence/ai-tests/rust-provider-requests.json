@@ -340,6 +340,86 @@
     }
   },
   {
+    "test": "a_long_stream_is_not_truncated_mid_answer",
+    "scenario": "longHealthy",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "概述这篇论文",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "a_stream_that_stops_mid_answer_is_reported_as_interrupted",
+    "scenario": "stallAfterContent",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "概述这篇论文",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "a_collected_answer_contains_every_delta",
+    "scenario": "slow",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "写笔记",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "a_collected_answer_is_empty_when_nothing_arrives",
+    "scenario": "abruptEmpty",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "写笔记",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
     "test": "context_is_sent_verbatim_and_nothing_else",
     "scenario": "happy",
     "method": "POST",
