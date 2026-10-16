@@ -18,6 +18,20 @@ target/
 # both; `npm run verify:fixtures` proves the result is usable.
 test-pdfs/
 test-fixtures/
+
+# Captured artefacts that reproduce a source document.
+#
+# The screenshots under evidence/ and test-artifacts/, and the annotated PDFs,
+# were taken while the app was open on a real IEEE paper — so they contain that
+# paper's title, author names, affiliation and body text, verbatim. Deleting the
+# source PDFs is not enough while those exist: they are copies of the same
+# content. Both are regenerated locally by running the app; what actually
+# documents a claim is the RESULTS.md beside them, which is kept.
+output/
+test-artifacts/
+evidence/**/*.png
+evidence/**/*.jpg
+evidence/**/*.pdf
 # Shipped installers. Deliberately OUTSIDE dist/: tauri.conf.json embeds all of
 # dist/ into the binary, so an installer kept there gets nested into the next one.
 release/
