@@ -557,3 +557,63 @@ test("new conversation clears the transcript but keeps the context mode", async 
   assert.equal(c.turns().length, 0);
   assert.equal(c.contextMode(), "current-page");
 });
+
+// ------------------------------------------------- A-20: honest page coverage
+
+/**
+ * The reported symptom: the panel said "整篇 · 共 6 页" while the model answered
+ * "基于提供的第1-4页内容". Both were right — the app had sent 4 pages, because
+ * two of them yielded no extractable text and were skipped, and the label was
+ * counting the *document's* pages instead of the *sent* ones.
+ */
+const gapped = {
+  ...base,
+  mode: "whole-document" as const,
+  pageCount: 6,
+  getPageText: async (p: number) =>
+    p === 5 || p === 6 ? "" : `第 ${p} 页内容`, // scans / image-only pages
+};
+
+test("whole-document reports how many pages were actually sent, not the document's count", async () => {
+  const built = await buildContext(gapped);
+  assert.equal(built.stats.pages_sent.length, 4, "only four pages had text");
+  assert.equal(built.stats.pages_total, 6);
+  assert.ok(
+    built.label.includes("4/6"),
+    `label must admit the gap, got: ${built.label}`
+  );
+  assert.ok(built.label.includes("无可提取文字"), built.label);
+});
+
+test("the model is told about unreadable pages instead of guessing", async () => {
+  const built = await buildContext(gapped);
+  const user = built.messages[built.messages.length - 1].content;
+  assert.ok(
+    user.includes("2 页没有可提取的文字"),
+    `the model must be told which pages it cannot see: ${user.slice(0, 400)}`
+  );
+  assert.ok(user.includes("扫描页") || user.includes("图片页"));
+});
+
+test("no gap and no truncation still says the simple thing", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 3,
+    getPageText: async (p: number) => `第 ${p} 页内容`,
+  });
+  assert.equal(built.label, "整篇 · 共 3 页");
+  const user = built.messages[built.messages.length - 1].content;
+  assert.ok(!user.includes("部分内容"), "nothing was withheld: " + user.slice(0, 200));
+});
+
+test("a fully scanned document says so plainly", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 4,
+    getPageText: async () => "",
+  });
+  assert.ok(built.label.includes("未能提取到文本"), built.label);
+  assert.deepEqual(built.stats.pages_sent, []);
+});

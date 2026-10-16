@@ -237,3 +237,82 @@ test("with nothing configured the header says so instead of showing a stale mode
   assert.equal(sel(panel, "ai-model-select").disabled, true);
   assert.deepEqual(calls.profiles, []);
 });
+/* --------------------------------------- A-20: streaming must not rebuild history */
+
+/**
+ * The reported symptom: text typed into the composer could not be deleted while
+ * an answer streamed. Measured cause: `render()` rebuilt the whole transcript
+ * on every token, re-running KaTeX over every finished message — 1773 ms of
+ * blocked UI thread per 200 tokens with 20 messages of history, which drops
+ * keystrokes.
+ *
+ * The assertion is node identity, not timing: timing tests are flaky, but "this
+ * finished message is still the very same DOM element" is exactly the property
+ * that makes the cost independent of history.
+ */
+const assistantTurn = (id, over = {}) => ({
+  id,
+  role: "assistant",
+  content: "已完成的一段回答",
+  phase: "completed",
+  createdAt: 0,
+  ...over,
+});
+
+test("a finished turn keeps its DOM node while another turn streams", () => {
+  const { panel } = makePanel();
+  const finished = [assistantTurn("a"), assistantTurn("b"), assistantTurn("c")];
+  panel.render(finished, null);
+
+  const before = panel.root.querySelectorAll(".ai-turn-assistant");
+  const beforeNodes = [...before];
+
+  // Stream a new answer token by token, exactly as the controller drives it.
+  const live = { id: "live", role: "assistant", content: "", phase: "streaming", createdAt: 0 };
+  for (let i = 1; i <= 25; i++) {
+    live.content = "tok".repeat(i);
+    panel.render([...finished, live], "live");
+  }
+
+  const after = [...panel.root.querySelectorAll(".ai-turn-assistant")];
+  assert.equal(after.length, 4, "the live turn must be there too");
+  for (let i = 0; i < 3; i++) {
+    assert.equal(
+      after[i],
+      beforeNodes[i],
+      `finished turn ${i} was rebuilt — this is what made every token cost O(history)`
+    );
+  }
+  assert.ok(after[3].textContent.includes("tok"), "the live turn must still update");
+});
+
+test("a turn that actually changes is re-rendered", () => {
+  const { panel } = makePanel();
+  const t = assistantTurn("a");
+  panel.render([t], null);
+  const before = panel.root.querySelector(".ai-turn-assistant");
+
+  // errorCode appears => the signature changes => it must be rebuilt.
+  panel.render([{ ...t, phase: "error", errorCode: "ai_timeout", errorMessage: "断了" }], null);
+  const after = panel.root.querySelector(".ai-turn-assistant");
+  assert.notEqual(after, before, "a changed turn must not be reused");
+  assert.ok(after.querySelector(".ai-error"), "and it must show the error");
+});
+
+test("switching conversations rebuilds instead of reusing stale nodes", () => {
+  const { panel } = makePanel();
+  panel.render([assistantTurn("a")], null);
+  panel.render([assistantTurn("z")], null);
+  const nodes = [...panel.root.querySelectorAll(".ai-turn-assistant")];
+  assert.equal(nodes.length, 1, "the old turn must be gone, not appended to");
+  assert.ok(nodes[0].textContent.includes("已完成"), "the new turn must be the one shown");
+});
+
+test("going back to an empty transcript restores the placeholder", () => {
+  const { panel } = makePanel();
+  panel.render([], null);
+  panel.render([assistantTurn("a")], null);
+  panel.render([], null);
+  assert.equal(panel.root.querySelectorAll(".ai-turn-assistant").length, 0);
+  assert.ok(panel.root.querySelector(".ai-empty"), "the placeholder must come back");
+});

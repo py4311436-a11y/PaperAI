@@ -81,6 +81,19 @@ export class ShimNode {
   }
 
   appendChild(n) {
+    // A DocumentFragment is *moved*, not inserted: the real DOM splices its
+    // children in. Without this the fragment stays as a single wrapper child,
+    // `childElementCount` is permanently 1, and any code that branches on it
+    // silently takes the wrong path — which is exactly how a test ended up
+    // passing against a branch it never executed.
+    if (n && n.isFragment) {
+      for (const c of [...n.childNodes]) {
+        c.parentNode = null;
+        this.appendChild(c);
+      }
+      n.childNodes.length = 0;
+      return n;
+    }
     n.parentNode = this;
     this.childNodes.push(n);
     return n;
@@ -101,7 +114,37 @@ export class ShimNode {
   removeChild(n) {
     const i = this.childNodes.indexOf(n);
     if (i >= 0) this.childNodes.splice(i, 1);
+    n.parentNode = null;
     return n;
+  }
+
+  /** `ChildNode.remove()` — used by the panel to drop the empty-state note. */
+  remove() {
+    if (this.parentNode) this.parentNode.removeChild(this);
+  }
+
+  replaceChild(next, old) {
+    const i = this.childNodes.indexOf(old);
+    if (i < 0) throw new Error("replaceChild: old node is not a child");
+    this.childNodes[i] = next;
+    next.parentNode = this;
+    old.parentNode = null;
+    return old;
+  }
+
+  /** Element children only — `children.length`, not `childNodes.length`. */
+  get children() {
+    return this.childNodes.filter((n) => n.nodeType === 1);
+  }
+
+  /**
+   * Without this the panel took its *full-rebuild* path in every unit test,
+   * because `undefined === turns.length` is false. The streaming-reuse tests
+   * then passed against code they never executed. A shim gap that silently
+   * selects the wrong branch is worse than one that throws.
+   */
+  get childElementCount() {
+    return this.children.length;
   }
 
   setAttribute(k, v) {
@@ -199,7 +242,9 @@ export class ShimDocument {
     return new ShimNode("#text")._setText(String(text));
   }
   createDocumentFragment() {
-    return new ShimNode("#fragment");
+    const n = new ShimNode("#fragment");
+    n.isFragment = true;
+    return n;
   }
   addEventListener() {}
   removeEventListener() {}

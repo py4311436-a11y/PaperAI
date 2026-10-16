@@ -117,6 +117,8 @@ interface Coverage {
   incomplete: boolean;
   /** The page cap rather than the character budget stopped the walk. */
   hitPageCap: boolean;
+  /** Pages that produced no extractable text (scans, image-only pages). */
+  missingPages: number;
 }
 
 function coverageNote(c: Coverage): string {
@@ -126,9 +128,17 @@ function coverageNote(c: Coverage): string {
   const range = first === last ? `第 ${first} 页` : `第 ${first}–${last} 页`;
   const why = c.hitPageCap
     ? `本次只读取了前 ${MAX_WHOLE_DOCUMENT_PAGES} 页`
-    : "内容超出了单次请求的长度上限";
+    : c.missingPages > 0 && !c.hitPageCap && c.included.length + c.missingPages >= c.total
+      ? // Every page that had text was sent; the rest are scans or images. Saying
+        // "only part of it" here would be wrong — nothing was cut off.
+        `另外有 ${c.missingPages} 页没有可提取的文字（可能是扫描页或图片页），因此你看不到它们的内容`
+      : "内容超出了单次请求的长度上限";
+  const lead =
+    c.missingPages > 0 && !c.hitPageCap && c.included.length + c.missingPages >= c.total
+      ? `【重要】以下是该论文中**能提取到文字的全部页面**（${range}，全文共 ${c.total} 页；${why}）。`
+      : `【重要】以上只是该论文的**部分内容**（${range}，全文共 ${c.total} 页；${why}）。`;
   return (
-    `【重要】以上只是该论文的**部分内容**（${range}，全文共 ${c.total} 页；${why}）。` +
+    lead +
     `请只就这部分内容作答，不要把它当作全文：明确说明你看到的是哪几页，` +
     `并指出因此无法判断哪些结论。`
   );
@@ -261,15 +271,25 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
       hitPageCap = cap < opts.pageCount;
       truncated = stoppedEarly || cutOne || hitPageCap;
 
+      // Pages that yielded no text are skipped by `continue` above, so
+      // `pages.length` can be smaller than the document without `truncated`
+      // being true. Reporting "共 N 页" in that case is a lie the model then
+      // contradicts ("基于提供的第1-4页内容"), which reads as the app losing
+      // pages for no stated reason. Say what was actually sent.
+      const missing = opts.pageCount - pages.length;
+      const gap = missing > 0 ? `（${missing} 页无可提取文字）` : "";
+
       if (!pages.length) {
         label = `整篇 · 未能提取到文本（共 ${opts.pageCount} 页）`;
-      } else if (!truncated) {
+      } else if (!truncated && missing <= 0) {
         label = `整篇 · 共 ${opts.pageCount} 页`;
+      } else if (!truncated) {
+        label = `整篇 · 已发送 ${pages.length}/${opts.pageCount} 页${gap}`;
       } else {
         const last = pages[pages.length - 1];
         label =
           `整篇 · 仅发送第 ${pages[0]}–${last} 页 / 共 ${opts.pageCount} 页` +
-          `${hitPageCap ? `（上限 ${MAX_WHOLE_DOCUMENT_PAGES} 页）` : "（内容超限）"}`;
+          `${hitPageCap ? `（上限 ${MAX_WHOLE_DOCUMENT_PAGES} 页）` : "（内容超限）"}${gap}`;
       }
       break;
     }
@@ -293,13 +313,21 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
   // Tell the model when it is looking at only part of the paper. Without this
   // it answers "简要概述这篇文章" with a confident summary of whatever prefix
   // happened to fit, and nothing in the output shows the truncation.
+  //
+  // Missing pages count as incomplete even when nothing was *cut*: pages with no
+  // extractable text (scans, images) are skipped, so a 6-page paper can arrive
+  // as 4 pages with no truncation at all — and the model, told nothing, says
+  // "基于提供的第1-4页内容" and the user has no way to tell that from a bug.
+  const missingPages =
+    opts.mode === "whole-document" ? Math.max(0, opts.pageCount - pages.length) : 0;
   const partialNote =
-    opts.mode === "whole-document" && truncated && pages.length
+    opts.mode === "whole-document" && pages.length && (truncated || missingPages > 0)
       ? coverageNote({
           included: pages,
           total: opts.pageCount,
           incomplete: true,
           hitPageCap,
+          missingPages,
         })
       : "";
 
