@@ -521,7 +521,6 @@ pub async fn list_models(
     http: &reqwest::Client,
     credential_id: Option<&str>,
     base_url: &str,
-    send_session_header: bool,
 ) -> Result<Vec<ModelOption>, AppError> {
     let url = config::models_url(base_url)?;
 
@@ -529,15 +528,17 @@ pub async fn list_models(
         .and_then(|id| secrets::read_secret(id).ok())
         .map(|k| format!("Bearer {k}"));
 
-    let mut rb = with_session(
-        http.get(&url)
-            .header("Accept", "application/json")
-            // Total budget is correct for a catalogue GET (A-16); the stream in
-            // `run_chat` is the opposite case.
-            .timeout(PROBE_TIMEOUT),
-        send_session_header,
-        Some("paperai-models"),
-    );
+    // No `x-opencode-session` here, deliberately. OpenCode's own guidance is that
+    // model-catalogue requests do not carry it — they are not part of a
+    // conversation, so there is no backend to pin. Sending one would give the
+    // catalogue its own pointless affinity scope; the header belongs on inference
+    // requests only, which is where `with_session` is called in `run_chat`.
+    let mut rb = http
+        .get(&url)
+        .header("Accept", "application/json")
+        // Total budget is correct for a catalogue GET (A-16); the stream in
+        // `run_chat` is the opposite case.
+        .timeout(PROBE_TIMEOUT);
     if let Some(a) = auth {
         rb = rb.header("Authorization", a);
     }

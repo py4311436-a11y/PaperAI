@@ -78,26 +78,16 @@ pub async fn ai_list_models(
     state: State<'_, AiState>,
     base_url: String,
     profile_id: Option<String>,
-    send_session_header: Option<bool>,
 ) -> Result<Vec<ModelOption>, AppError> {
     // Validate before the network so a bad URL fails fast with a precise code.
     config::normalize_base_url(&base_url)?;
 
-    let (credential_id, session_header) = match profile_id {
-        Some(id) if !id.trim().is_empty() => {
-            let p = settings::get(&id)?;
-            (Some(p.credential_id), p.sends_session_header)
-        }
-        _ => (None, send_session_header.unwrap_or(false)),
+    let credential_id = match profile_id {
+        Some(id) if !id.trim().is_empty() => Some(settings::get(&id)?.credential_id),
+        _ => None,
     };
 
-    provider::list_models(
-        state.provider.http(),
-        credential_id.as_deref(),
-        &base_url,
-        session_header,
-    )
-    .await
+    provider::list_models(state.provider.http(), credential_id.as_deref(), &base_url).await
 }
 
 /// Create or update a profile. Base URL is validated and normalised here.

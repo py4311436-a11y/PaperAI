@@ -19,11 +19,18 @@ import {
   buildMemoryDocument,
   chunkMessages,
   mergePrompt,
-  injectMemory,
   memoryContextBlock,
   planChunks,
   CHUNK_CHAR_BUDGET,
 } from "../../dist-test/src/ai/memory.js";
+import { buildContext } from "../../dist-test/src/ai/context-builder.js";
+
+/** The message carrying the document — located by its wrapper, not by position. */
+function docMessage(built) {
+  const m = built.messages.find((x) => x.content.includes("<document_context>"));
+  if (!m) throw new Error("no message carries the document");
+  return m.content;
+}
 
 const page = (n, len = 100) => ({ page: n, text: "字".repeat(len) });
 const pages = (count, len = 100) => Array.from({ length: count }, (_, i) => page(i + 1, len));
@@ -205,55 +212,142 @@ test("prompts forbid restating the source, which is what makes notes mergeable",
   const last = msgs[msgs.length - 1].content;
   assert.ok(last.includes("不要复述原文"), "verbatim copying makes merging expensive");
 });
-/* ------------------------------------------------- A-21: how memory is injected */
+/* ------------------------- A-22: how memory is placed, and what it must not do */
 
-const baseMsgs = [
-  { role: "system", content: "SYSTEM_PROMPT" },
-  { role: "user", content: "第一问" },
-  { role: "assistant", content: "第一答" },
-  { role: "user", content: "【来源】《p.pdf》\n<document_context>正文</document_context>" },
-];
+/**
+ * These replace the A-21 tests, which asserted on a standalone `injectMemory()`
+ * helper. That helper is gone: the notes are now built into the document message
+ * by `buildContext`, because they have to sit in the cache prefix (A-22). The
+ * properties being defended are the same, so they are asserted here against the
+ * real thing.
+ *
+ * The important one is the first: OpenCode and several other gateways validate
+ * the role sequence and reject a payload with two `system` entries, so memory
+ * must never be smuggled in as a second system prompt.
+ */
+const baseMsgs = {
+  mode: "whole-document",
+  pageCount: 3,
+  question: "这篇论文的核心结论是什么？",
+  getPageText: async (p) => `第 ${p} 页的正文内容`,
+};
+const mem = {
+  path: "D:/x/论文.pdf.paperai-notes.md",
+  exists: true,
+  bytes: 2048,
+  updatedAt: "2026-10-16 20:00",
+  coveredPages: "1–3（共 3 页）",
+  content: "- 研究内容：提出了一种参数提取框架\n- 关键结论：RMSE 下降 23%",
+};
 
-test("memory must NOT become a second system message", () => {
-  // OpenCode and several other OpenAI-compatible gateways validate the role
-  // sequence and reject a payload with more than one `system` entry. Sending
-  // one would mean this feature 400s on first use.
-  const out = injectMemory(baseMsgs, "<reading_memory>\n笔记\n</reading_memory>");
+test("memory must not become a second system message", async () => {
+  const built = await buildContext({ ...baseMsgs, memory: mem });
   assert.equal(
-    out.filter((m) => m.role === "system").length,
+    built.messages.filter((m) => m.role === "system").length,
     1,
-    "exactly one system message must remain"
+    "exactly one system message must remain — gateways reject two"
   );
 });
 
-test("the role sequence is otherwise untouched", () => {
-  const out = injectMemory(baseMsgs, "<reading_memory>x</reading_memory>");
-  assert.deepEqual(
-    out.map((m) => m.role),
-    baseMsgs.map((m) => m.role)
-  );
-  assert.equal(out.length, baseMsgs.length, "no message may be added or dropped");
-});
+test("memory rides in the document message, not appended after the history", async () => {
+  const history = [
+    { role: "user", content: "第一个问题" },
+    { role: "assistant", content: "第一个回答" },
+  ];
+  const built = await buildContext({ ...baseMsgs, memory: mem, history });
+  const roles = built.messages.map((m) => m.role);
+  assert.equal(roles.filter((r) => r === "system").length, 1);
+  for (const r of roles) assert.ok(["system", "user", "assistant"].includes(r), `role ${r}`);
 
-test("memory is placed in the final user turn, ahead of the document text", () => {
-  const out = injectMemory(baseMsgs, "<reading_memory>上一轮的结论</reading_memory>");
-  const last = out[out.length - 1];
-  assert.ok(last.content.startsWith("<reading_memory>"), last.content.slice(0, 80));
+  const withMemory = built.messages.find((m) => m.content.includes("<reading_memory>"));
+  assert.ok(withMemory, "the notes must be in a message of their own position");
+  // Before the history, i.e. inside the stable prefix — that is the whole point.
+  const historyIdx = built.messages.findIndex((m) => m.content === "第一个问题");
   assert.ok(
-    last.content.indexOf("<reading_memory>") < last.content.indexOf("<document_context>"),
-    "the notes come before the paper, because the paper outranks them"
+    built.messages.indexOf(withMemory) < historyIdx,
+    "the notes must precede the history to be part of the cache prefix"
   );
 });
 
-test("earlier turns are left byte-identical", () => {
-  const out = injectMemory(baseMsgs, "<reading_memory>x</reading_memory>");
-  for (let i = 0; i < baseMsgs.length - 1; i++) {
-    assert.equal(out[i], baseMsgs[i], "history must not be rewritten");
-  }
+test("memory is placed ahead of the document text", async () => {
+  const built = await buildContext({ ...baseMsgs, memory: mem });
+  const m = docMessage(built);
+  assert.ok(
+    m.indexOf("<reading_memory>") < m.indexOf("<document_context>"),
+    "the paper outranks the notes, so it comes last"
+  );
 });
 
-test("no memory means the messages are passed straight through", () => {
-  assert.equal(injectMemory(baseMsgs, null), baseMsgs);
-  const empty = injectMemory([], "<reading_memory>x</reading_memory>");
-  assert.deepEqual(empty, []);
+test("adding memory does not rewrite the history or the question", async () => {
+  const history = [{ role: "user", content: "第一个问题" }];
+  const withMem = await buildContext({ ...baseMsgs, memory: mem, history });
+  const without = await buildContext({ ...baseMsgs, history });
+  // The question and the history must be untouched...
+  assert.equal(withMem.messages.at(-1).content, without.messages.at(-1).content);
+  assert.equal(
+    withMem.messages.find((m) => m.content === "第一个问题").content,
+    without.messages.find((m) => m.content === "第一个问题").content
+  );
+  // ...and only the context message gains the notes.
+  assert.notEqual(
+    withMem.messages.find((m) => m.content.includes("<document_context>")).content,
+    without.messages.find((m) => m.content.includes("<document_context>")).content
+  );
+});
+
+test("no memory means nothing is injected at all", async () => {
+  const a = await buildContext({ ...baseMsgs });
+  const b = await buildContext({ ...baseMsgs, memory: null });
+  assert.deepEqual(a.messages, b.messages);
+  assert.ok(!a.messages.some((m) => m.content.includes("reading_memory")));
+});
+
+/* ------------------------------------- A-22: the document is a stable prefix */
+
+/**
+ * The reason the split exists. Providers cache on the prefix from token 0, so
+ * the document must be byte-identical between turns about the same paper. A
+ * timestamp or a per-turn counter anywhere in that message would silently cost
+ * the cache on every single question.
+ */
+test("the document message is byte-identical across turns of one conversation", async () => {
+  const first = await buildContext({ ...baseMsgs, memory: mem, question: "问题一" });
+  const history = [
+    { role: "user", content: "问题一" },
+    { role: "assistant", content: "回答一" },
+  ];
+  const second = await buildContext({ ...baseMsgs, memory: mem, question: "问题二", history });
+
+  const a = first.messages.find((m) => m.content.includes("<document_context>"));
+  const b = second.messages.find((m) => m.content.includes("<document_context>"));
+  assert.ok(a && b, "both requests must carry the document");
+  assert.equal(a.content, b.content, "the document message must not vary between turns");
+});
+
+test("the question is what varies, and it is the last message", async () => {
+  const first = await buildContext({ ...baseMsgs, question: "问题一" });
+  const second = await buildContext({ ...baseMsgs, question: "问题二" });
+  assert.notEqual(first.messages.at(-1).content, second.messages.at(-1).content);
+  assert.ok(first.messages.at(-1).content.includes("问题一"));
+  assert.ok(second.messages.at(-1).content.includes("问题二"));
+  assert.ok(first.messages.at(-1).content.includes("【任务】"));
+});
+
+test("the document precedes the history so the prefix can be cached", async () => {
+  const history = [
+    { role: "user", content: "早一点的问题" },
+    { role: "assistant", content: "早一点的回答" },
+  ];
+  const built = await buildContext({ ...baseMsgs, history });
+  const docIdx = built.messages.findIndex((m) => m.content.includes("<document_context>"));
+  const histIdx = built.messages.findIndex((m) => m.content === "早一点的问题");
+  assert.ok(docIdx >= 0 && histIdx >= 0);
+  assert.ok(docIdx < histIdx, "document must come before history");
+  assert.equal(built.messages[0].role, "system", "the system prompt stays first");
+});
+
+test("with no document there is no context message, just the question", async () => {
+  const built = await buildContext({ ...baseMsgs, mode: "none" });
+  assert.equal(built.messages.length, 2, "system + question only");
+  assert.ok(built.messages.at(-1).content.includes("没有提供论文原文"));
 });

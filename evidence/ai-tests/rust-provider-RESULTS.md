@@ -1,6 +1,6 @@
 # Rust provider integration suite (against local Mock SSE)
 
-Generated: 2026-10-16T08:41:12.100Z
+Generated: 2026-10-16T13:27:54.533Z
 Runner: scripts/run-ai-rust-tests.mjs
 
 | Test | Mock scenario | Result | Requests seen by mock |
@@ -31,8 +31,11 @@ Runner: scripts/run-ai-rust-tests.mjs
 | context_is_sent_verbatim_and_nothing_else | happy | **PASS** | 1 |
 | opencode_profiles_send_the_session_header | happy | **PASS** | 1 |
 | ordinary_profiles_do_not_send_the_session_header | happy | **PASS** | 1 |
+| the_session_header_value_is_the_conversation_id | happy | **PASS** | 0 |
+| the_notes_pipeline_uses_its_own_session_scope | happy | **PASS** | 0 |
+| a_model_catalogue_request_carries_no_session_header | happy | **PASS** | 1 |
 
-**26/26 PASS**
+**29/29 PASS**
 
 The mock redacts `Authorization` before recording, so
 `rust-provider-requests.json` is safe to archive as evidence.

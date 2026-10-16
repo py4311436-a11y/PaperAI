@@ -55,6 +55,9 @@ const PLAN = [
   ["context_is_sent_verbatim_and_nothing_else", "happy"],
   ["opencode_profiles_send_the_session_header", "happy"],
   ["ordinary_profiles_do_not_send_the_session_header", "happy"],
+  ["the_session_header_value_is_the_conversation_id", "happy"],
+  ["the_notes_pipeline_uses_its_own_session_scope", "happy"],
+  ["a_model_catalogue_request_carries_no_session_header", "happy"],
 ];
 
 /** Must match `TEST_SESSION_ID` in src-tauri/tests/ai_provider.rs. */
@@ -80,6 +83,22 @@ function checkHeaders(test, mock) {
     return {
       ok: got === undefined,
       note: got === undefined ? "未发送（符合预期）" : `不该发送却发送了：${got}`,
+    };
+  }
+  // A-22: the catalogue request is not part of a conversation, so it must not
+  // carry the affinity header at all. Checked over *every* recorded request,
+  // because a stray header on any one of them would pin the catalogue to a
+  // backend for no reason.
+  if (test === "a_model_catalogue_request_carries_no_session_header") {
+    const offenders = mock.requests
+      .filter((r) => r.headers?.["x-opencode-session"] !== undefined)
+      .map((r) => `${r.method} ${r.url}`);
+    return {
+      ok: offenders.length === 0,
+      note:
+        offenders.length === 0
+          ? "所有请求均未携带 x-opencode-session（符合上游指引）"
+          : `以下请求仍携带该头：${offenders.join(", ")}`,
     };
   }
   return null;

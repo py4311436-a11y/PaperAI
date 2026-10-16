@@ -183,15 +183,13 @@ export async function aiProviderPresets(): Promise<AiProfile[]> {
  * so the free models can be browsed before anything is saved. A key is only
  * ever used when `profileId` names a saved profile.
  */
-export async function aiListModels(
-  baseUrl: string,
-  profileId?: string,
-  sendSessionHeader?: boolean
-): Promise<ModelOption[]> {
+export async function aiListModels(baseUrl: string, profileId?: string): Promise<ModelOption[]> {
+  // No session header here: OpenCode's guidance is that catalogue requests are
+  // not part of a conversation and so are not pinned to a backend. The header is
+  // an inference-only concern, sent by the chat path.
   return await invoke<ModelOption[]>("ai_list_models", {
     baseUrl,
     profileId: profileId ?? null,
-    sendSessionHeader: sendSessionHeader ?? null,
   });
 }
 

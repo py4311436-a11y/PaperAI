@@ -482,5 +482,16 @@
       "model": "mock-model",
       "stream": true
     }
+  },
+  {
+    "test": "a_model_catalogue_request_carries_no_session_header",
+    "scenario": "happy",
+    "method": "GET",
+    "url": "/models",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": null,
+    "accept": "application/json",
+    "sessionHeader": null,
+    "body": ""
   }
 ]

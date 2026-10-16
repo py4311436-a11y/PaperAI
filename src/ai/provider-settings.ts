@@ -25,11 +25,10 @@ export interface SettingsDeps {
    * The provider's live model catalogue. A network call, not a local list:
    * catalogues change weekly, so anything shipped in the app goes stale.
    */
-  listModels: (
-    baseUrl: string,
-    profileId?: string,
-    sendSessionHeader?: boolean
-  ) => Promise<ModelOption[]>;
+  /** Fetch a provider's live model catalogue. No session header: catalogue
+   * requests are not part of a conversation, so they are not pinned to a
+   * backend (OpenCode's own guidance). */
+  listModels: (baseUrl: string, profileId?: string) => Promise<ModelOption[]>;
   save: (p: AiProfile) => Promise<ProfileStatus>;
   remove: (id: string, deleteCredential: boolean) => Promise<void>;
   setKey: (id: string, key: string) => Promise<void>;
@@ -101,7 +100,7 @@ export class ProviderSettings {
       // The profile may not be saved yet, so the id is passed as a hint only —
       // Rust ignores it unless it names a saved profile, which is what keeps a
       // stored key from being sent to a host it was never configured for.
-      const models = await this.deps.listModels(e.base_url, e.id, e.sends_session_header);
+      const models = await this.deps.listModels(e.base_url, e.id);
       this.lastModels = models;
       this.fillModelSelect(models);
       const incompatible = models.filter((m) => m.compatibility === "incompatible").length;

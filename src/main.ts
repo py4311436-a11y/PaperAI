@@ -28,7 +28,6 @@ import { buildContext, PRESET_PROMPTS } from "./ai/context-builder";
 import {
   buildMemoryDocument,
   chunkMessages,
-  injectMemory,
   memoryContextBlock,
   mergePrompt,
   planChunks,
@@ -171,8 +170,7 @@ const chat = new ChatController({
 const settings = new ProviderSettings({
   list: () => bridge.aiListProfiles(),
   presets: () => bridge.aiProviderPresets(),
-  listModels: (baseUrl, profileId, sendSessionHeader) =>
-    bridge.aiListModels(baseUrl, profileId, sendSessionHeader),
+  listModels: (baseUrl, profileId) => bridge.aiListModels(baseUrl, profileId),
   save: (p) => bridge.aiSaveProfile(p),
   remove: (id, del) => bridge.aiDeleteProfile(id, del),
   setKey: (id, k) => bridge.aiSetKey(id, k),
@@ -253,7 +251,7 @@ async function loadModels(p: ProfileStatus): Promise<void> {
   }
   panel.setModelListNote(p.id, "正在拉取模型列表…", savedModelOf(p.id));
   try {
-    const models = await bridge.aiListModels(p.base_url, p.id, p.sends_session_header);
+    const models = await bridge.aiListModels(p.base_url, p.id);
     if (token !== modelFetchToken || activeProfileId !== p.id) return;
     modelCatalogues.set(p.id, { baseUrl: p.base_url, models });
     panel.setModels(p.id, models, savedModelOf(p.id));
@@ -408,6 +406,9 @@ async function sendWithMode(question: string, mode: ContextMode): Promise<void> 
     pageCount: adapter.numPages,
     documentTitle: currentName || "未命名文档",
     history: chat.history(),
+    // Reading memory is passed in so it lands in the stable prefix with the
+    // document, not appended after the history where nothing can be cached.
+    memory: currentMemory,
   });
 
   if (mode === "current-page" || mode === "nearby-pages") {
@@ -417,18 +418,17 @@ async function sendWithMode(question: string, mode: ContextMode): Promise<void> 
     }
   }
 
-  // Reading memory goes in as prior context, folded into the user turn ahead of
-  // the document text — see `injectMemory` for why it is not a second `system`
-  // message.
-  const memory = memoryContext();
-  const messages = injectMemory(built.messages, memory);
+  // Reading memory goes in as prior context, folded into the document message
+  // ahead of the history — see composeContextTurn for why it is not a second
+  // `system` message and why it must sit in the stable prefix.
+  const messages = built.messages;
 
   panel.show();
   renderChat();
   const turnId = await chat.send({
     question,
     messages,
-    contextLabel: memory ? `${built.label} · 含阅读笔记` : built.label,
+    contextLabel: memoryContext() ? `${built.label} · 含阅读笔记` : built.label,
     stats: built.stats,
   });
   renderChat();

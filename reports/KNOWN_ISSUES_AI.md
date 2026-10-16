@@ -207,6 +207,65 @@ and the right behaviour.
 
 ---
 
+### A-22 — FIXED in 0.5.3: the document was re-sent at full price on every question
+
+Reported 2026-10-16: "就算是整篇模式也不能每次都上传吧，上传一次大模型应该就有记忆了吧".
+
+The intuition is right; the mechanism is different from the one assumed. The
+HTTP API is stateless — nothing is remembered between requests, which is why the
+client must resend context every time. What approximates "upload once" is
+**prefix caching**, and DeepSeek documents the rule precisely: the match must
+start at token 0, and a match that begins mid-payload does not count. Cached
+input is billed at roughly 1/20, and their own measurement is first-token latency
+dropping from 13 s to 500 ms on a mostly-repeated 128 K input.
+
+The payload was built as `[system, ...history, user(document + question)]`. The
+document sat *after* the history, and the history changes every turn, so the
+shared prefix between two requests ended before the document — the paper was
+never in a cache prefix and every question paid full price for it. The reading
+notes had the same problem, because they were appended from outside this module
+after the history.
+
+Fixed by splitting the document into its own user message, immediately after the
+system prompt and ahead of the history, with the notes inside it:
+
+```
+[system, user(document + notes), ...history, user(question)]
+```
+
+Two consequences, both deliberate:
+
+* The first two messages are both `user`. OpenAI-compatible APIs do not require
+  alternating roles, and this is the only way to get the document into a shared
+  prefix without putting untrusted text into the system prompt — which this
+  module refuses to do, because the wrapper in a user-role message is what stops
+  a document containing its own closing tag from escaping the context. Trading
+  the injection defence for a cache hit is a bad trade.
+* Nothing in that message may vary between turns. A timestamp, a page count
+  derived from scroll position, anything, would silently cost the cache on every
+  question. There is a test asserting the message is byte-identical across turns.
+
+Tests: the document message is byte-identical across turns; the question is what
+varies and is the last message; the document precedes the history; notes land in
+the same message, ahead of the paper, and do not rewrite the history or the
+question; no memory means nothing is injected. The structural assertions were
+re-pointed at the message that carries the document rather than "the last
+message" — which would otherwise have kept passing while checking nothing.
+
+### A-22b — OpenCode: catalogue requests no longer carry the session header
+
+`list_models` sent `x-opencode-session: paperai-models`. OpenCode's own guidance
+is that model-catalogue requests do not carry it, because they are not part of a
+conversation and there is no backend to pin. Removed, along with the now-dead
+parameter that carried it through the bridge and the command.
+
+The inference path keeps the header, and now has three tests instead of one: the
+value is the conversation id and is identical across turns of the same
+conversation while differing between conversations; the notes pipeline uses its
+own scope; and a catalogue request carries no header at all. The last is asserted
+from the mock's request log over *every* recorded request, and is
+negative-controlled — re-adding the header fails it with `GET /models` named.
+
 ### A-21 — FIXED in 0.5.2: reading memory was sent as a second `system` message
 
 Found while answering "is 阅读笔记 the memory file?" — reviewing what had shipped,
