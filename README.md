@@ -6,11 +6,88 @@ Built with **Tauri 2 + PDF.js 6.4.299**. Real PDF annotations (highlight, ink)
 are written back into the file; select a passage and ask an AI to explain or
 translate it, with the answer streamed into a side panel.
 
-> Status: **0.4.0**. See `reports/PHASE3_FINAL_VALIDATION.md` for what is proven
+> Status: **0.5.0**. See `reports/PHASE3_FINAL_VALIDATION.md` for what is proven
 > and what is not — in particular, the AI loop has not yet been exercised by a
 > human on a real desktop, and no live provider has been contacted.
 > Earlier documents (`FINAL_TECHNICAL_VALIDATION.md`, `TEST_RESULTS.md`) are kept
 > for history; where they disagree, the newer file wins.
+
+---
+
+## Building from source (for collaborators)
+
+```powershell
+git clone <your-remote-url> PaperAI
+cd PaperAI
+npm ci                      # lockfile is committed; use ci, not install
+npm run build:release       # bundles the frontend into dist/
+npx tauri build             # produces release/bundle/nsis/PaperAI_<ver>_x64-setup.exe
+```
+
+Prerequisites, all of them:
+
+| Tool | Why | Notes |
+|---|---|---|
+| Node 20+ (22 used) | Vite build, test runners | `npm ci` installs the rest |
+| Rust, MSVC toolchain | the Tauri binary | `rustup default stable-x86_64-pc-windows-msvc` |
+| Visual Studio Build Tools + Windows 11 SDK | linker for Rust | only needed to *build*; running the installer needs nothing |
+| WebView2 Runtime | runs the app | preinstalled on Windows 11 |
+
+### Do not copy `scripts/env.sh`
+
+It is **this machine's** local setup and contains absolute paths that will not
+exist on yours:
+
+```sh
+export CARGO_HOME='D:/.cargo'                    # ← this machine
+export CARGO_TARGET_DIR='D:/PaperAI-Build/target' # ← this machine
+_MSVC="D:/PaperAI-Build/VS2022BT/.../14.44.35207" # ← this machine, exact build
+_SDKVER="10.0.26100.0"                            # ← this machine, exact SDK
+```
+
+It exists only because the toolchain was installed on D: here. A plain
+`cargo build` / `npx tauri build` works **without** it once rustup and the Build
+Tools are installed — that is the normal path. If you keep the file for your own
+machine, do not commit your edits to it.
+
+### Tests you can run without a PDF or a desktop
+
+```bash
+npm run test:ai          # frontend units + Rust provider suite against a local mock
+npm run test:ui          # real Chromium over CDP: toolbar, panel pickers, overlays
+npm run typecheck        # tsc --noEmit
+cd src-tauri && cargo test --lib
+```
+
+`npm run verify:no-profiles` is a guard, not a test: it fails if browser profile
+data or credential files ever reappear in the tree. Run it before committing.
+
+Two suites are deliberately **not** in `npm test`: `tests/windows-integration.mjs`
+installs and uninstalls the app, and `tests/save-safety.mjs` /
+`tests/desktop-verify.mjs` need a real desktop session.
+
+### Conventions worth knowing before you change something
+
+* **`dist/` is not a delivery folder.** `tauri.conf.json` sets `frontendDist` to
+  `../dist`, so everything in it is embedded into the binary. Deliverables live
+  in `release/` (git-ignored), and `scripts/build.mjs` *fails the build* if
+  `dist/` contains anything but `assets/`, `index.html`, `cmaps/` or
+  `standard_fonts/`. This is not pedantry: an earlier release shipped 22 MiB
+  because the previous installer sat inside the next one.
+* **A new test must be able to fail.** Every regression suite here is
+  negative-controlled — the fix is reverted, the test is run, and it must go
+  red. A test that passes against the broken code proves nothing. The reasoning
+  is recorded next to each one.
+* **Rendering bugs need a browser.** Several defects here (a `<datalist>` that
+  could not be picked from, a highlighted toolbar button, math that rendered as
+  raw LaTeX) were invisible to logic tests. `npm run test:ui` is real Chromium
+  over CDP for that reason.
+* **`pdfjs-dist` is pinned** at 6.4.299. The annotation editor is a PDF.js
+  *internal* API; read `reports/PDFJS_COMPATIBILITY.md` before bumping it, and
+  re-run `tests/final-verify.mjs`.
+* Nothing in this repository may contain an API key. Keys live in the Windows
+  Credential Manager under `PaperAI/AIProvider/<id>` and are never read back by
+  the UI.
 
 ---
 
