@@ -1036,6 +1036,12 @@ $("#btn-fit-page").addEventListener("click", () => {
   zoomLabel.textContent = `${Math.round(adapter.scale * 100)}%`;
 });
 
+// The toolbar entry for the screenshot question. The chat composer has one
+// too; this one exists because the action is about *where you are looking* —
+// the question occurs to the user while they are reading a figure, and the
+// toolbar is where they already are. Both arm the same overlay.
+$("#btn-shot").addEventListener("click", () => armScreenshot());
+
 const aiToggle = $("#btn-ai");
 if (aiToggle) {
   aiToggle.addEventListener("click", () => {
