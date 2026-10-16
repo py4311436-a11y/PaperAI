@@ -81,13 +81,27 @@ cd src-tauri && cargo test --lib
 `npm run verify:no-profiles` is a guard, not a test: it fails if browser profile
 data or credential files ever reappear in the tree. Run it before committing.
 
-`node scripts/scrub-evidence.mjs` removes the Windows account name and email
-addresses from `evidence/` and `reports/` (they appear in captured Edge/WebView2
-command lines and credential listings). It replaces identity rather than deleting
-the logs, because those logs are the proof trail behind the claims in
-`reports/KNOWN_ISSUES_AI.md`. Run it before publishing; `--check` reports without
-writing. Note that it deliberately **fails** on an API-key pattern instead of
-redacting it — a key in a log means it was live and has to be rotated.
+**`node scripts/verify-publishable.mjs` is the one to run before making the
+repository public.** Flipping visibility is one-way, and the dangerous material
+is rarely in the working tree — a deleted file is still retrievable from history,
+and a screenshot taken with the app open on a real paper reproduces that paper
+verbatim. The audit therefore checks the working tree, *every commit*, machine
+identity, and key-shaped strings; key patterns fail loudly rather than being
+masked, because a key in a tracked file was live and has to be rotated.
+
+Two supporting scripts, both re-runnable:
+
+* `node scripts/scrub-evidence.mjs` replaces the Windows account name, user
+  paths and email addresses in `evidence/` and `reports/` — identity is replaced
+  rather than the logs deleted, because those logs are the proof trail behind the
+  claims in `reports/KNOWN_ISSUES_AI.md`. `--check` reports without writing.
+* `npm run fixtures` / `npm run verify:fixtures` regenerate the test PDFs and
+  prove they are usable.
+
+Screenshots and annotated PDFs under `evidence/` are **not** committed. They were
+captured with the app open on a real paper, so they contain that paper's title,
+authors and body text; what documents each claim is the `RESULTS.md` beside them,
+which is kept.
 
 Two suites are deliberately **not** in `npm test`: `tests/windows-integration.mjs`
 installs and uninstalls the app, and `tests/save-safety.mjs` /
