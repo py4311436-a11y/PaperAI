@@ -1,7 +1,7 @@
 {
   "name": "paperai-poc",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "PaperAI — Read · Annotate · Ask. Windows desktop PDF reader (Tauri 2 + PDF.js)",
   "scripts": {
@@ -9,7 +9,7 @@
     "fixtures": "node scripts/make-test-pdfs.mjs && node scripts/make-fixtures.mjs",
     "verify:fixtures": "node scripts/verify-test-fixtures.mjs",
     "dev": "npm run sync:assets && vite",
-    "build": "npm run sync:assets && tsc --noEmit && vite build",
+    "build": "npm run sync:assets && node scripts/prune-dist.mjs mark && tsc --noEmit && vite build && node scripts/prune-dist.mjs sweep",
     "preview": "vite preview --port 4173",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",

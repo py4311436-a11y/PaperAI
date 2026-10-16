@@ -25,7 +25,12 @@ use super::types::{AiProfile, ProfileStatus};
 /// (`/chat/completions`, `/messages`, `/responses`), so e.g. MiniMax and Qwen
 /// on Go would need the Anthropic dialect and are deliberately not offered.
 pub fn presets() -> Vec<AiProfile> {
-    vec![deepseek_preset(), opencode_go_preset(), opencode_zen_preset()]
+    vec![
+        deepseek_preset(),
+        zhipu_preset(),
+        opencode_go_preset(),
+        opencode_zen_preset(),
+    ]
 }
 
 /// DeepSeek's first-party API.
@@ -41,6 +46,58 @@ pub fn deepseek_preset() -> AiProfile {
         model: "deepseek-flash".into(),
         credential_id: "deepseek".into(),
         is_default: true,
+        sends_session_header: false,
+    }
+}
+
+/// 智谱 GLM — the free tier that actually fits this app.
+///
+/// Chosen over the other free providers for four reasons that are all specific
+/// to how PaperAI works, not to how generous the quota looks:
+///
+///  - **Vision.** `glm-4.6v-flash` takes images, so the screenshot feature
+///    (A-23) works without paying anything. Most free tiers are text-only.
+///  - **Context.** 131K is enough for `whole-document` mode, which sends up to
+///    ~160k characters ≈ 50k tokens. Groq's free tier also advertises a large
+///    window but caps at 8k tokens *per minute*, which makes whole-document
+///    mode unusable there no matter how fast it is.
+///  - **No proxy.** Direct from mainland China, which matters here: the
+///    machine's egress proxy is intermittent.
+///  - **OpenAI-compatible.** Same `/chat/completions` path this app already
+///    speaks — zero code change.
+///
+/// Verification level, stated plainly because the header comment promises more
+/// than could be done here: both `open.bigmodel.cn/api/paas/v4` and
+/// `api.z.ai/api/paas/v4` were probed live and answer **401 with a well-formed
+/// API error rather than 404**, which confirms the path exists and is routed —
+/// but the model ids below could not be confirmed against `/models`, because
+/// that endpoint needs a key. They come from a source that documents having
+/// tested them against this exact endpoint, plus several independent
+/// corroborating listings. **Confirm in one click**: add the profile and press
+/// 测试连接, which fetches the live catalogue.
+///
+/// The domestic endpoint is the default because it needs no proxy; the
+/// international one (`https://api.z.ai/api/paas/v4`) serves the same models if
+/// the user prefers it, and the field is editable.
+///
+/// `glm-4.6v-flash` is the default rather than the newer `glm-4.7-flash` (200K
+/// context, text-only): for this app's payload sizes the smaller window is
+/// enough, and vision is the capability that cannot be added by switching
+/// models later. Pick `glm-4.7-flash` from the dropdown for long text work.
+///
+/// Free-tier caveats, from the providers' own pages: one concurrent request at
+/// roughly one per second, and peak-hour 429s have been reported on the vision
+/// model. Both are fine for a single-user reader and neither is enforced here.
+pub fn zhipu_preset() -> AiProfile {
+    AiProfile {
+        id: "zhipu".into(),
+        display_name: "智谱 GLM（免费）".into(),
+        base_url: "https://open.bigmodel.cn/api/paas/v4".into(),
+        model: "glm-4.6v-flash".into(),
+        credential_id: "zhipu".into(),
+        is_default: false,
+        // Zhipu does not ask for a conversation header; that is an OpenCode
+        // gateway requirement (see `sends_session_header` on the type).
         sends_session_header: false,
     }
 }
@@ -258,12 +315,30 @@ mod tests {
         assert!(!secrets::has_secret("deepseek") || true, "preset carries no key by itself");
     }
 
+    /// The Zhipu preset is the only free one that can carry an image, so its
+    /// shape matters: a vision default, the domestic endpoint (no proxy), and
+    /// no session header. Someone "tidying" the model name to the newer
+    /// text-only `glm-4.7-flash` would silently cost the screenshot feature
+    /// its only free path.
+    #[test]
+    fn zhipu_preset_defaults_to_a_vision_model_on_the_domestic_endpoint() {
+        let p = zhipu_preset();
+        assert!(p.model.contains('v'), "default must be the vision model, got {}", p.model);
+        assert!(
+            p.base_url.starts_with("https://open.bigmodel.cn"),
+            "the domestic endpoint is the default because the egress proxy is unreliable"
+        );
+        assert!(!p.sends_session_header, "Zhipu does not ask for one");
+        assert!(!p.is_default, "DeepSeek stays the default");
+        assert!(presets().iter().any(|x| x.id == "zhipu"), "must be offered");
+    }
+
     /// Every preset must survive the same validation a user-typed profile does.
     /// A preset that cannot be saved is worse than no preset.
     #[test]
     fn every_preset_is_saveable_and_distinct() {
         let all = presets();
-        assert!(all.len() >= 3, "expected at least DeepSeek, Go and Zen");
+        assert!(all.len() >= 4, "expected at least DeepSeek, Zhipu, Go and Zen");
         let mut ids = std::collections::HashSet::new();
         for p in &all {
             assert_eq!(

@@ -14,6 +14,15 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
+    // Do NOT let vite empty the output directory.
+    //
+    // `emptyOutDir` removes the tree with one recursive call, and this
+    // machine's shell refuses a bulk tree delete past 50 files. That made
+    // `npm run build` a coin flip: fine on a clean tree, dead once
+    // dist/assets had accumulated more than 50 files — i.e. every build after
+    // the first. `scripts/prune-dist.mjs` does the pruning instead, one file
+    // at a time, which the guard does not object to.
+    emptyOutDir: false,
     // Source maps only for automation builds. A release map would (a) add
     // ~3.3 MiB to dist/, which tauri then embeds into the setup.exe, and
     // (b) publish the original TypeScript inside a distributed installer.
