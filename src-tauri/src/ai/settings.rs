@@ -55,7 +55,7 @@ pub fn deepseek_preset() -> AiProfile {
 /// Chosen over the other free providers for four reasons that are all specific
 /// to how PaperAI works, not to how generous the quota looks:
 ///
-///  - **Vision.** `glm-4.6v-flash` takes images, so the screenshot feature
+///  - **Vision.** `glm-4v-flash` takes images, so the screenshot feature
 ///    (A-23) works without paying anything. Most free tiers are text-only.
 ///  - **Context.** 131K is enough for `whole-document` mode, which sends up to
 ///    ~160k characters ≈ 50k tokens. Groq's free tier also advertises a large
@@ -67,33 +67,46 @@ pub fn deepseek_preset() -> AiProfile {
 ///    speaks — zero code change.
 ///
 /// Verification level, stated plainly because the header comment promises more
-/// than could be done here: both `open.bigmodel.cn/api/paas/v4` and
-/// `api.z.ai/api/paas/v4` were probed live and answer **401 with a well-formed
-/// API error rather than 404**, which confirms the path exists and is routed —
-/// but the model ids below could not be confirmed against `/models`, because
-/// that endpoint needs a key. They come from a source that documents having
-/// tested them against this exact endpoint, plus several independent
-/// corroborating listings. **Confirm in one click**: add the profile and press
-/// 测试连接, which fetches the live catalogue.
+/// than could be done here. **The model id below is not verified.** Both
+/// `open.bigmodel.cn/api/paas/v4` and `api.z.ai/api/paas/v4` were probed live
+/// with a deliberately invalid key and every model id tried — the retired
+/// `glm-4.6v-flash`, the current `glm-4v-flash`, `glm-4.1v-thinking-flash`,
+/// `glm-4-flash` — answered **401 with a well-formed API error**. The auth
+/// check therefore precedes model validation on this endpoint, so a 401
+/// proves the path exists and nothing more. It does **not** show that any
+/// particular id is served. `/models` needs a real key and, per a third-party
+/// report, does not list the free models at all, so even that will not settle
+/// it from the UI. The id comes from a source that documents having tested it
+/// against this exact endpoint. **Confirm in one click**: add the profile and
+/// press 测试连接.
 ///
 /// The domestic endpoint is the default because it needs no proxy; the
 /// international one (`https://api.z.ai/api/paas/v4`) serves the same models if
 /// the user prefers it, and the field is editable.
 ///
-/// `glm-4.6v-flash` is the default rather than the newer `glm-4.7-flash` (200K
-/// context, text-only): for this app's payload sizes the smaller window is
-/// enough, and vision is the capability that cannot be added by switching
-/// models later. Pick `glm-4.7-flash` from the dropdown for long text work.
+/// `glm-4v-flash` replaced `glm-4.6v-flash`, which was the previous default and
+/// no longer works: Zhipu's free tier rejected most requests for it as
+/// overloaded on both the China and international services, and by 2026-10-10
+/// it was retired from at least one gateway's catalogue outright. `glm-4v-flash`
+/// is the id that a hands-on survey of the free tier reports as reliably
+/// callable (~1.1s, and the recommendation for image understanding). That
+/// survey is second-hand; the same caveat above applies. `glm-4.1v-thinking-flash`
+/// (image reasoning) and `glm-4-flash` (text, the most stable) are also free —
+/// pick from the dropdown if this one misbehaves.
 ///
 /// Free-tier caveats, from the providers' own pages: one concurrent request at
 /// roughly one per second, and peak-hour 429s have been reported on the vision
 /// model. Both are fine for a single-user reader and neither is enforced here.
+/// One caveat worth knowing because the error message misleads: Zhipu error
+/// `1305` ("该模型当前访问量过大") is a *model-side* shortage, not a rate limit
+/// on your account — backing off does not help, only retrying later or using a
+/// different model does.
 pub fn zhipu_preset() -> AiProfile {
     AiProfile {
         id: "zhipu".into(),
         display_name: "智谱 GLM（免费）".into(),
         base_url: "https://open.bigmodel.cn/api/paas/v4".into(),
-        model: "glm-4.6v-flash".into(),
+        model: "glm-4v-flash".into(),
         credential_id: "zhipu".into(),
         is_default: false,
         // Zhipu does not ask for a conversation header; that is an OpenCode
@@ -331,6 +344,29 @@ mod tests {
         assert!(!p.sends_session_header, "Zhipu does not ask for one");
         assert!(!p.is_default, "DeepSeek stays the default");
         assert!(presets().iter().any(|x| x.id == "zhipu"), "must be offered");
+    }
+
+    /// The vision assertion above is a proxy (`contains('v')` is also true of
+    /// ids like `deepseek-v4-pro`). Pin the id explicitly, and pin what it must
+    /// not be: `glm-4.6v-flash` was this preset's default until 2026-10-17,
+    /// when Zhipu's free tier stopped serving it. Nothing in the code would
+    /// have noticed — the endpoint answers 401 for a retired id exactly as it
+    /// does for a live one — so the id is nailed down here instead, with the
+    /// reason, so the next person to "modernise" it reads why it went back.
+    ///
+    /// This does not and cannot verify that the provider serves the id; see the
+    /// verification-level note on `zhipu_preset`.
+    #[test]
+    fn zhipu_default_is_not_a_retired_free_tier_id() {
+        let p = zhipu_preset();
+        assert_eq!(
+            p.model, "glm-4v-flash",
+            "the default free vision model changed; update the doc comment and KNOWN_ISSUES together"
+        );
+        assert!(
+            !p.model.starts_with("glm-4.6v-flash"),
+            "glm-4.6v-flash was retired from Zhipu's free tier — do not put it back"
+        );
     }
 
     /// Every preset must survive the same validation a user-typed profile does.

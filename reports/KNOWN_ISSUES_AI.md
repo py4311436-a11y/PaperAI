@@ -207,6 +207,37 @@ and the right behaviour.
 
 ---
 
+### A-24 — FIXED in 0.6.3: the Zhipu free preset defaulted to a retired model id
+
+The preset's default model, `glm-4.6v-flash`, stopped working: Zhipu's free
+tier rejected most requests for it as overloaded on both the China and
+international services, and by 2026-10-10 at least one gateway had retired the
+id outright. Now `glm-4v-flash`.
+
+**The interesting part is why nothing caught it.** The endpoint answers **401
+for a retired id exactly as it does for a live one** — auth is checked before
+model validation. So the probe that "verified" this preset when it was written
+(401 rather than 404, therefore the path exists) proved only the path. The
+doc comment already admitted the model ids were unconfirmed and the setting's
+own 测试连接 was pointed at as the real check, and then an unconfirmed id was
+made the default anyway. Free-tier models rotate on someone else's schedule;
+a preset pinned to one is a preset with an expiry date nobody wrote down.
+
+**What was done.** The default changed, the doc comment now states the
+verification level without hedging it into uselessness, and
+`zhipu_default_is_not_a_retired_free_tier_id` pins the id with the reason
+attached — verified by deliberately reverting it and watching that test fail
+with the right message. `glm-4.1v-thinking-flash` (image reasoning) and
+`glm-4-flash` (text) are also free and selectable from the dropdown.
+
+**Also worth knowing:** Zhipu error `1305` ("该模型当前访问量过大") is a
+*model-side* shortage, not a rate limit on your account. Backing off does not
+help. The error text reads like throttling and invites the wrong response.
+
+**Not verified:** that Zhipu serves `glm-4v-flash` *today*. The evidence is a
+second-hand hands-on survey of the free tier, not a call this repository made
+with a working key. 测试连接 remains the only one-click check.
+
 ### A-23 — 0.6.0: multimodal support and region screenshots
 
 Requested after A-22, with the screenshot feature as the stated next step.
@@ -606,3 +637,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | — | `![alt](url)` rendered as a clickable link instead of an inert placeholder |
 | — | URLs with balanced parentheses were truncated at the first `)` |
 | — | `secrets.rs` compared an `HRESULT` against a raw Win32 code, so a missing key surfaced as `ai_secret_store` instead of `ai_no_key` |
+| A-24 | The Zhipu free preset defaulted to a retired model id, and a 401-based probe could not have caught it |
