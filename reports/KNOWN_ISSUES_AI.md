@@ -207,6 +207,71 @@ and the right behaviour.
 
 ---
 
+### A-35 — 0.6.10: the send button was dead from the first second; tables render
+
+**The real cause of "Enter does nothing with DeepSeek".** A-33 addressed a
+swallowed keystroke, but the report was sharper than that: the send button was
+dead on a freshly opened document, before any AI request had been made.
+
+That is a bug introduced by A-31 (persisted conversations). A saved turn could
+carry `preparing` or `streaming`, and on restore it came back as an *active*
+turn. The panel derives `busy` from the phase, so it disabled sending — with
+nothing in flight that could ever finish. The state was permanent: reopening the
+document restored the same dead turn.
+
+How it got written despite `scheduleChatSave` only saving on a terminal phase:
+the guard ran when the timer was *scheduled*, the snapshot was taken when it
+*fired*. In between, the user could send another question, and the snapshot then
+contained a turn that was still running.
+
+Fixed in three places, each tested: the snapshot is taken at schedule time, so
+the check and the content describe the same moment; `toStoredChat` never writes a
+non-terminal phase (coerced to `cancelled` — the turn was interrupted by the app
+closing, which is what happened); and `fromStoredChat` never trusts one found in a
+file, because older files already contain them. A null turn id from `send()` is
+no longer silent either: it names the reason.
+
+**Markdown tables now render.** They never did — the renderer had no table
+support, so a parameter table arrived as one run of `| 阶段 | 优化参数 | ...`, and
+the column structure, which was the entire reason the model used a table, was
+lost. Cells go through the inline renderer, so `$C_{ox}$` renders as math instead
+of showing dollars. Alignment markers, escaped pipes, ragged rows (padded, so
+later columns cannot shift) and horizontal scrolling are handled and tested.
+
+**Notes generate automatically after the first whole-document answer.** The
+document is already in the model's hands at that moment, so it is the cheapest
+point to note-ify — and every later question then costs a few hundred tokens
+instead of re-sending the paper. Guards: never overwrites existing notes, never
+retries a document that already failed, never runs while something else is. The
+user is told, because this spends their tokens.
+
+**The default context mode is now `whole-document`.** It was `selection`, which
+on a fresh document with nothing selected refused the first question outright —
+the default was making the decision that the send would fail.
+
+### A-33 — 0.6.9: Enter is no longer swallowed, and a busy stream now times out
+
+Two reports that turned out to be one cause and one consequence.
+
+**"Enter stopped working, but only with DeepSeek."** The send button is disabled
+while an answer streams; a disabled button cannot stop a keystroke, so Enter went
+straight to `submit()`, which had no busy check. `chat.send()` then returned
+`null` for a busy session — with no message anywhere. (The permanent version of
+this is A-35, above.)
+
+**"OpenCode hung for minutes with no output."** The request was not dead. The
+stall deadline was reset by *any* byte on the stream — including SSE comments and
+role-only chunks, which a chatty gateway emits continuously during a large
+upload. So the 60-second first-token timeout never fired: the connection was
+never idle, it just never said anything.
+
+Fixed with a second deadline that nothing resets: the first *content* must arrive
+within 180 seconds. Deliberately separate from the idle timeout rather than a
+longer version of it, because the two catch different failures — a quiet
+connection versus a busy one producing nothing — and the A-16 behaviour (a slow
+but producing stream must run to completion) has to survive. Both are tested, and
+the negative control removes the ceiling and watches it fail.
+
 ### A-32 — 0.6.8: notes as the document, persisted conversations, history switch
 
 Three changes that all answer the same question — what does a follow-up actually
@@ -928,3 +993,5 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-31 | Conversations persist beside the PDF (JSON + content-addressed images), with timestamps |
 | A-32 | Notes can stand in for the document in whole-document mode; history can be switched off. `slice(-0)` sent all history instead of none |
 | A-33 | Enter while streaming was swallowed with no message (looked model-dependent); a keepalive-only stream never hit the idle timeout |
+| A-34 | Markdown tables were never rendered; pipes arrived as literal text |
+| A-35 | A restored turn saved mid-stream made the app permanently busy, so sending was dead from startup. Snapshots were taken after the guard |

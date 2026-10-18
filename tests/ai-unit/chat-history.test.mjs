@@ -206,3 +206,73 @@ test("an unusable time renders as nothing rather than a placeholder", () => {
   assert.equal(formatTurnTime(Number.NaN), "");
   assert.equal(formatTurnTime(0), "");
 });
+
+/* -------------------------- a restored turn must never look in-flight (A-35) -- */
+
+/**
+ * The reported bug: opening a document with DeepSeek left the send button dead
+ * from the first second, with nothing in flight.
+ *
+ * The mechanism: a saved turn carrying `preparing` or `streaming` came back as an
+ * *active* turn. The panel derives `busy` from the phase, so it disabled sending
+ * — and nothing would ever finish, because no request existed. The only escape
+ * was to know that the conversation file was at fault.
+ *
+ * These tests pin both directions: never write such a phase, and never trust one
+ * found in a file (older files may already contain them).
+ */
+test("a running phase is never written to disk", () => {
+  for (const phase of ["preparing", "streaming", "cancelling"]) {
+    const stored = toStoredChat({
+      turns: [{ id: "t", role: "assistant", content: "写到一半", phase, createdAt: 1 }],
+    });
+    assert.equal(
+      stored.turns[0].phase,
+      "cancelled",
+      `${phase} would come back as an in-flight turn`
+    );
+  }
+});
+
+test("a running phase in an existing file is read back as cancelled", () => {
+  // Belt and braces for files written before the write side prevented it.
+  const turns = fromStoredChat({
+    version: 1,
+    turns: [
+      {
+        id: "t",
+        role: "assistant",
+        content: "写到一半",
+        createdAt: "2026-10-18T11:00:00.000Z",
+        phase: "streaming",
+      },
+    ],
+  });
+  assert.equal(turns[0].phase, "cancelled", "a restored turn must be terminal");
+  assert.equal(isTerminalPhase(turns[0].phase), true);
+});
+
+test("a restored conversation contains no turn the panel would call active", () => {
+  // The property that matters end to end: after a restore, nothing may look like
+  // it is still running.
+  const turns = fromStoredChat({
+    version: 1,
+    turns: [
+      { id: "a", role: "user", content: "问", createdAt: "2026-10-18T11:00:00.000Z" },
+      { id: "b", role: "assistant", content: "", createdAt: "2026-10-18T11:00:01.000Z", phase: "preparing" },
+    ],
+  });
+  const active = turns.filter((t) => t.phase === "preparing" || t.phase === "streaming");
+  assert.equal(active.length, 0, "a restored transcript must not look busy");
+});
+
+test("an error and a cancellation still round-trip as themselves", () => {
+  // The coercion must not flatten everything to cancelled: an interrupted answer
+  // and a failed one mean different things when read back.
+  for (const phase of ["error", "cancelled"]) {
+    const stored = toStoredChat({
+      turns: [{ id: "t", role: "assistant", content: "部分", phase, createdAt: 1 }],
+    });
+    assert.equal(stored.turns[0].phase, phase);
+  }
+});

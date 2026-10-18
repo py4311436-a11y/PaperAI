@@ -182,6 +182,47 @@ body {
   cursor: pointer;
 }
 
+/* Tables from model output.
+   Scrolls horizontally instead of squeezing: a four-column parameter table has
+   no useful narrow form, and squashing it makes the numbers unreadable rather
+   than saving space. */
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 6px;
+}
+.md-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+.md-table th,
+.md-table td {
+  padding: 5px 9px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.22);
+  border-right: 1px solid rgba(127, 127, 127, 0.18);
+  text-align: left;
+  vertical-align: top;
+  /* Long parameter names must wrap, not push the table off-screen. */
+  overflow-wrap: anywhere;
+}
+.md-table th:last-child,
+.md-table td:last-child {
+  border-right: 0;
+}
+.md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.md-table th {
+  font-weight: 600;
+  background: rgba(127, 127, 127, 0.12);
+  white-space: nowrap;
+}
+.md-table tbody tr:nth-child(even) {
+  background: rgba(127, 127, 127, 0.05);
+}
+
 /* When a turn was sent. Quiet: the timestamp is reference information, not
    something to read on every pass. */
 .ai-turn-time {

@@ -315,3 +315,113 @@ test("a link inside a heading is still inert", () => {
   assert.equal(container.querySelectorAll(".md-link").length, 0);
   assert.ok(container.textContent.includes("链接已禁用"));
 });
+
+/* --------------------------------------------------------- tables (A-34) -- */
+
+/**
+ * The reported bug: a parameter table arrived as one run of pipe characters.
+ *
+ * The renderer had no table support at all, so `| 阶段 | 优化参数 | ...` came
+ * through as literal text. That is worse than plain prose — the column structure
+ * was the entire reason the model used a table.
+ */
+function md(source) {
+  const el = dom.doc.createElement("div");
+  // Math left on: a parameter table contains formulas, and rendering cells as
+  // plain text would leave `$C_{ox}$` visible — the same defect as the pipes.
+  renderMarkdown(el, source, { math: true });
+  return el;
+}
+
+const PARAM_TABLE = `| 阶段 | 优化参数 | 依据特性 | 目标函数 |
+|------|----------|----------|----------|
+| 阶段1 | 基于场的参数 | — | — |
+| 阶段2 | $C_{ox}$、$E_{g0}-E_{g2}$ | Cgg–Vgg（CV） | $O_1$（公式5） |
+| 阶段3 | $\\mu_{eff}$、$n_{sub}$ | 线性转移特性（I–V） | $O_2$（公式6） |`;
+
+test("a markdown table becomes a real table", () => {
+  const root = md(PARAM_TABLE);
+  const table = root.querySelector("table");
+  assert.ok(table, "no table element was produced");
+  assert.ok(!root.textContent.includes("|---"), "the separator row must not survive as text");
+});
+
+test("the header and every body row land in the right cells", () => {
+  const root = md(PARAM_TABLE);
+  const heads = root.querySelectorAll("th").map((th) => th.textContent.trim());
+  assert.deepEqual(heads, ["阶段", "优化参数", "依据特性", "目标函数"]);
+
+  const rows = root.querySelectorAll("tbody tr");
+  assert.equal(rows.length, 3, `expected three body rows, got ${rows.length}`);
+  const first = rows[0].querySelectorAll("td").map((td) => td.textContent.trim());
+  assert.deepEqual(first, ["阶段1", "基于场的参数", "—", "—"]);
+});
+
+test("math inside a cell is rendered, not left as dollar signs", () => {
+  // A parameter table always contains formulas. Plain-text cells would show
+  // `$C_{ox}$`, which is the same defect as the pipes — the notation was the
+  // point.
+  const root = md(PARAM_TABLE);
+  // Assert on the renderer's own marker rather than on KaTeX output: the test
+  // environment has no layout engine, so KaTeX may fall back to literal text.
+  // What must be true either way is that the cell content went through the
+  // inline renderer instead of being printed as a plain string.
+  const math = root.querySelectorAll(".md-math-inline");
+  assert.ok(math.length > 0, "cell math did not go through the inline renderer");
+  const cells = root.querySelectorAll("td");
+  assert.ok(
+    cells.some((td) => td.textContent.includes("C")),
+    "the formula text must still be present in its cell"
+  );
+});
+
+test("alignment markers are applied", () => {
+  const root = md("| a | b | c |\n|:--|:--:|--:|\n| 1 | 2 | 3 |");
+  const th = root.querySelectorAll("th");
+  assert.equal(th[0].style.textAlign, "left");
+  assert.equal(th[1].style.textAlign, "center");
+  assert.equal(th[2].style.textAlign, "right");
+});
+
+test("a prose line with a pipe is not mistaken for a table", () => {
+  // The separator row is what defines a table. Without this check, a sentence
+  // like "用 A | B 表示" would swallow the following lines.
+  const root = md("这里用 A | B 表示两种情况。\n下一行还是普通文字。");
+  assert.equal(root.querySelector("table"), null, "made a table out of prose");
+  assert.ok(root.textContent.includes("A | B"), root.textContent);
+});
+
+test("a ragged row is padded so later columns do not shift", () => {
+  // Model output routinely has a short row. Letting it shift would put values
+  // under the wrong heading, which is a wrong answer rather than a layout nit.
+  const root = md("| a | b | c |\n|---|---|---|\n| 1 | 2 |");
+  const tds = root.querySelectorAll("tbody tr")[0].querySelectorAll("td");
+  assert.equal(tds.length, 3, "the row must still have three cells");
+  assert.equal(tds[2].textContent.trim(), "");
+});
+
+test("an escaped pipe stays a literal pipe inside its cell", () => {
+  const root = md("| expr | note |\n|---|---|\n| P(a \\| b) | 条件概率 |");
+  const tds = root.querySelectorAll("tbody tr")[0].querySelectorAll("td");
+  assert.equal(tds.length, 2, "the escaped pipe must not split the cell");
+  assert.ok(tds[0].textContent.includes("P(a | b)"), tds[0].textContent);
+});
+
+test("a table with no body rows still renders its header", () => {
+  const root = md("| a | b |\n|---|---|");
+  assert.ok(root.querySelector("table"));
+  assert.equal(root.querySelectorAll("tbody tr").length, 0);
+});
+
+test("the table ends at a blank line and the prose after it survives", () => {
+  const root = md("| a | b |\n|---|---|\n| 1 | 2 |\n\n表格之后的说明文字。");
+  assert.equal(root.querySelectorAll("tbody tr").length, 1);
+  assert.ok(root.textContent.includes("表格之后的说明文字"), root.textContent);
+});
+
+test("a table is wrapped so a wide one can scroll", () => {
+  // Four columns do not fit a side panel; squeezing them makes the numbers
+  // unreadable instead of saving space.
+  const root = md(PARAM_TABLE);
+  assert.ok(root.querySelector(".md-table-wrap"), "missing scroll container");
+});

@@ -284,6 +284,151 @@ function parseLinkAt(text: string, start: number): ParsedLink | null {
  * Render a markdown document into `container`.
  * `container` is cleared first; its children are rebuilt from scratch.
  */
+/**
+ * Split one table row into cell texts.
+ *
+ * The leading and trailing pipes are optional in Markdown, and a cell may
+ * contain an escaped pipe (`\|`) that must survive as a literal character —
+ * otherwise a formula like `P(a \| b)` would be cut in half and the columns
+ * after it would shift by one.
+ */
+function splitRow(line: string): string[] {
+  let text = line.trim();
+  if (text.startsWith("|")) text = text.slice(1);
+  if (text.endsWith("|") && !text.endsWith("\\|")) text = text.slice(0, -1);
+
+  const cells: string[] = [];
+  let cell = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\\" && text[i + 1] === "|") {
+      cell += "|";
+      i++;
+      continue;
+    }
+    if (ch === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      continue;
+    }
+    cell += ch;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+type Align = "left" | "center" | "right" | null;
+
+/** `:---` / `:---:` / `---:` -> alignment; anything else -> not a separator. */
+function parseAlign(cell: string): Align | "invalid" {
+  const t = cell.trim();
+  if (!/^:?-+:?$/.test(t)) return "invalid";
+  const left = t.startsWith(":");
+  const right = t.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  if (left) return "left";
+  return null;
+}
+
+interface TableStart {
+  headerCells: string[];
+  aligns: Align[];
+  /** Raw body row lines, header and separator excluded. */
+  bodyLines: string[];
+  /** Index just past the last body row. */
+  end: number;
+}
+
+/**
+ * Recognise a table at `lines[i]`, or null.
+ *
+ * Requires a header row *and* a separator row: the separator is what makes it a
+ * table. Detecting on the header alone would swallow prose that happens to
+ * contain a pipe.
+ */
+function matchTable(lines: string[], i: number): TableStart | null {
+  const header = lines[i];
+  const sep = lines[i + 1];
+  if (header === undefined || sep === undefined) return null;
+  if (!header.includes("|") || !sep.includes("|")) return null;
+
+  const headerCells = splitRow(header);
+  const sepCells = splitRow(sep);
+  if (headerCells.length !== sepCells.length) return null;
+
+  const aligns: Align[] = [];
+  for (const c of sepCells) {
+    const a = parseAlign(c);
+    if (a === "invalid") return null;
+    aligns.push(a);
+  }
+
+  // Body runs until a blank line or a line that is not a row. A line without a
+  // pipe ends the table rather than being silently absorbed into the last cell.
+  const bodyLines: string[] = [];
+  let end = i + 2;
+  while (end < lines.length) {
+    const row = lines[end];
+    if (!row.trim() || !row.includes("|")) break;
+    bodyLines.push(row);
+    end++;
+  }
+  return { headerCells, aligns, bodyLines, end };
+}
+
+/**
+ * Build the DOM table.
+ *
+ * Cells go through `inline`, so a cell may contain bold text, inline code or
+ * LaTeX — which a parameter table always does (`$C_{ox}$`, `$O_1$`). Rendering
+ * cells as plain strings would show the raw `$...$`, which is the same defect
+ * as the pipes.
+ *
+ * A row with fewer cells than the header is padded, and one with more is
+ * truncated: ragged rows are common in model output and must not shift the
+ * columns of everything below them.
+ */
+function buildTable(start: TableStart, opts: RenderOptions): HTMLElement | null {
+  const cols = start.headerCells.length;
+  if (!cols) return null;
+
+  const table = el("table", "md-table");
+  const thead = el("thead");
+  const headRow = el("tr");
+  start.headerCells.forEach((text, idx) => {
+    const th = el("th");
+    if (start.aligns[idx]) th.style.textAlign = start.aligns[idx]!;
+    th.appendChild(inline(text, opts));
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  if (start.bodyLines.length) {
+    const tbody = el("tbody");
+    for (const line of start.bodyLines) {
+      const cells = splitRow(line);
+      const tr = el("tr");
+      for (let c = 0; c < cols; c++) {
+        const td = el("td");
+        if (start.aligns[c]) td.style.textAlign = start.aligns[c]!;
+        const text = cells[c] ?? "";
+        if (text) td.appendChild(inline(text, opts));
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+  }
+
+  // Wide tables must scroll rather than squeeze the column width to nothing —
+  // a parameter table with four columns does not fit a side panel.
+  const wrap = el("div", "md-table-wrap");
+  wrap.appendChild(table);
+  return wrap;
+}
+
 export function renderMarkdown(
   container: HTMLElement,
   source: string,
@@ -326,6 +471,25 @@ export function renderMarkdown(
       // textContent: a code block is inert text, never markup.
       pre.appendChild(el("code", undefined, body.join("\n")));
       container.appendChild(pre);
+      continue;
+    }
+
+    // --- table ---
+    //
+    // Model output uses tables heavily for comparisons, and this renderer had no
+    // table support at all: pipes came through as literal text, so a parameter
+    // table arrived as one unreadable run of `| 阶段 | 优化参数 | ...`. That is
+    // worse than plain prose, because the column structure was the whole point.
+    //
+    // A table is recognised by its separator row (`|---|:--:|`), not by the
+    // header alone — a prose line can contain a pipe, but the second line being
+    // a separator is what actually defines a table in Markdown.
+    const tableStart = matchTable(lines, i);
+    if (tableStart) {
+      flushParagraph(para);
+      const table = buildTable(tableStart, opts);
+      if (table) container.appendChild(table);
+      i = tableStart.end;
       continue;
     }
 

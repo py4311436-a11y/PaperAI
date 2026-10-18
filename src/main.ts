@@ -41,7 +41,7 @@ import {
   type ChunkNote,
   type PageText,
 } from "./ai/memory";
-import { fromStoredChat, isTerminalPhase } from "./ai/chat-history.js";
+import { fromStoredChat, isTerminalPhase, type StoredChat } from "./ai/chat-history.js";
 import {
   captureSelection,
   installSelectionTracking,
@@ -402,20 +402,71 @@ let chatSaveTimer: ReturnType<typeof setTimeout> | null = null;
  * a debounce that fired mid-stream would store a truncated answer, which reads
  * later as the model having trailed off for no reason.
  */
+/**
+ * Whether the last question was about the whole document.
+ *
+ * Recorded at send time rather than inferred later from a label string: the
+ * label is presentation, and rebuilding a control decision out of it is how the
+ * two drift apart.
+ */
+let lastSendWasWholeDocument = false;
+/** Documents we have already tried to note-ify, so a failure is not retried in a loop. */
+const notesAutoTried = new Set<string>();
+
+/**
+ * Generate reading notes after the first whole-document answer.
+ *
+ * The trade this makes: the first question already uploaded the entire document,
+ * so the notes cost one more pass and are then worth many — every later question
+ * drops from thousands of tokens of page images to a few hundred of text. Doing
+ * it on the first question rather than asking the user to find a button is the
+ * difference between the feature being used and being ignored.
+ *
+ * Guards, in order of why they matter:
+ *  - notes already exist: never overwrite work the user may have edited
+ *  - already tried for this document: a failure must not become a retry loop
+ *    that spends tokens every time a question is asked
+ *  - something else is running: the notes pipeline would be refused mid-flight
+ *
+ * Stated plainly to the user, because this spends their tokens without being
+ * asked. The memory row shows the progress.
+ */
+function maybeAutoNotes(): void {
+  if (!currentPath || !activeProfileId) return;
+  if (!lastSendWasWholeDocument) return;
+  if (currentMemory?.content?.trim()) return;
+  if (memoryBusy || chat.isBusy()) return;
+  const key = currentDocumentId ?? currentPath;
+  if (notesAutoTried.has(key)) return;
+  if (!adapter.numPages) return;
+
+  notesAutoTried.add(key);
+  toast("正在自动生成阅读笔记，之后提问不必再重发全文（可在「阅读笔记」处查看进度）", "info");
+  void generateMemory();
+}
+
 function scheduleChatSave(): void {
   const last = chat.turns().at(-1);
   if (!last || last.role !== "assistant" || !isTerminalPhase(last.phase)) return;
   if (chatSaveTimer !== null) clearTimeout(chatSaveTimer);
+  // Snapshot now, not when the timer fires. Between the two the user can send
+  // another question, and a snapshot taken then would contain a turn that is
+  // still running — which comes back on the next open as an active turn and
+  // disables sending with nothing in flight. The check above and the snapshot
+  // have to describe the same moment.
+  // An answer just finished. If it was a whole-document question, the document
+  // is already in the model's hands — the cheapest possible moment to note-ify.
+  maybeAutoNotes();
+  const doc = chat.snapshotForStorage(currentName || "未命名文档");
   chatSaveTimer = setTimeout(() => {
     chatSaveTimer = null;
-    saveChatHistory();
+    saveChatHistory(doc);
   }, 400);
 }
 
-function saveChatHistory(): void {
+function saveChatHistory(doc: StoredChat): void {
   if (!currentPath) return;
   const path = currentPath;
-  const doc = chat.snapshotForStorage(currentName || "未命名文档");
   if (!doc.turns.length) return;
   // Serialised so two rapid turns cannot interleave their writes and leave the
   // file holding neither.
@@ -624,6 +675,7 @@ async function sendWithMode(
   attachments: ImageAttachment[] = [],
   remember = true,
 ): Promise<void> {
+  lastSendWasWholeDocument = mode === "whole-document" || mode === "whole-document-images";
   if (!activeProfileId) {
     panel.show();
     toast("请先在设置中配置 AI Provider", "warn");
@@ -739,6 +791,16 @@ async function sendWithMode(
     imageTokens: activeProfile()?.image_tokens,
   });
   renderChat();
+  // A null turn id means the controller refused: no session, no provider, or a
+  // request already in flight. Previously that was the end of it — nothing sent,
+  // nothing said — and the only way to interpret it was "the app is broken".
+  if (!turnId) {
+    const why = !chat.turns().length
+      ? "会话尚未就绪，请重新打开文档后再试"
+      : "上一个回答仍在进行中，请稍候或点「停止」";
+    diagnostics.log("warn", `send refused: ${why}`);
+    toast(`未发送：${why}`, "warn");
+  }
 
   // Learn from a refusal.
   //

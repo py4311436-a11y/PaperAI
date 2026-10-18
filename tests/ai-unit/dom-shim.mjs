@@ -185,6 +185,18 @@ export class ShimNode {
     for (const fn of this.listeners[type] ?? []) fn(ev);
   }
 
+  /**
+   * Inline style bag.
+   *
+   * The real DOM has `element.style`; the shim did not, so `th.style.textAlign
+   * = "right"` threw and the table-alignment test failed with a TypeError
+   * instead of checking what it meant to check.
+   */
+  get style() {
+    if (!this._style) this._style = {};
+    return this._style;
+  }
+
   get classList() {
     const self = this;
     return {
@@ -247,7 +259,25 @@ export class ShimNode {
   }
 
   querySelectorAll(sel) {
-    // Class, tag and id selectors — everything the panel and renderer use.
+    // Class, tag, id, and space-separated descendant selectors — everything the
+    // panel, the renderer and the table tests use.
+    //
+    // Descendant support was added when tables arrived: `querySelectorAll(
+    // "tbody tr")` silently returned nothing, which fails a test *inside* its
+    // assertion rather than at the selector. Same family as the missing
+    // `classList.toggle`: a shim that cannot express the query makes the test
+    // report the wrong thing.
+    const parts = sel.trim().split(/\s+/).filter(Boolean);
+    if (parts.length > 1) {
+      let scope = [this];
+      for (const part of parts) {
+        const next = [];
+        for (const node of scope) next.push(...node.querySelectorAll(part));
+        // De-duplicate: a nested match can be found from more than one ancestor.
+        scope = [...new Set(next)];
+      }
+      return scope;
+    }
     if (sel.startsWith(".")) {
       const cls = sel.slice(1);
       return this.allElements().filter((e) => e.classList.contains(cls));

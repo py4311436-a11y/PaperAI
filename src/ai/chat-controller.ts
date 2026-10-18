@@ -160,8 +160,17 @@ export class ChatController {
     return this.session()?.turns.slice() ?? [];
   }
 
+  /**
+   * The context mode for this conversation.
+   *
+   * Defaults to `whole-document` rather than `selection`. A fresh document with
+   * nothing selected and a `selection` default means the first question is
+   * refused outright — the mode silently decided the send would fail. Whole
+   * document is what someone opening a paper and asking about it means, and it
+   * is the reading that the notes pipeline can then economise.
+   */
   contextMode(): ContextMode {
-    return this.session()?.contextMode ?? "selection";
+    return this.session()?.contextMode ?? "whole-document";
   }
 
   setContextMode(mode: ContextMode): void {

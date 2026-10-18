@@ -103,7 +103,16 @@ export function toStoredChat(input: {
       createdAt: toIso(t.createdAt),
     };
     if (t.contextLabel) stored.contextLabel = t.contextLabel;
-    if (t.phase && t.phase !== "completed") stored.phase = t.phase;
+    // Never persist a phase that means "still running". A stored `preparing` or
+    // `streaming` comes back on the next open as an active turn, which the panel
+    // reads as busy — so the send button is disabled from the first second and
+    // nothing is in flight to finish. The user has no way to clear it.
+    //
+    // The turn was interrupted by the app closing, so it is recorded as
+    // cancelled: that is what happened, and it is a terminal state.
+    if (t.phase && t.phase !== "completed") {
+      stored.phase = isTerminalPhase(t.phase) ? t.phase : "cancelled";
+    }
     if (t.attachments?.length) {
       stored.attachments = t.attachments.map((a) => ({
         dataUrl: a.url,
@@ -160,7 +169,9 @@ export function fromStoredChat(doc: StoredChat | null | undefined): ChatTurn[] {
       // A missing timestamp reads as "unknown" rather than "1970", which would
       // look like a real time from a broken clock.
       createdAt: Number.isNaN(at) ? 0 : at,
-      phase: (t.phase as ChatTurn["phase"]) ?? "completed",
+      // Same coercion on the way in, for files written before the write side
+      // learned to prevent it. A non-terminal phase here is a deadlock.
+      phase: isTerminalPhase(t.phase) ? (t.phase as ChatTurn["phase"]) : "cancelled",
       contextLabel: t.contextLabel,
       attachments: attachments.length ? attachments : undefined,
     });
