@@ -121,7 +121,6 @@ def push_one(commit: str) -> str:
                 "The trees differ, so the branch moved in a way this script did not\n"
                 "make. Fetch and inspect before pushing."
             )
-
     # 2. Upload every blob this commit touches and verify the SHA matches.
     #
     # GitHub hashes what it received. If its SHA equals the one git computed,
@@ -185,40 +184,56 @@ def push_one(commit: str) -> str:
 def main() -> None:
     commit = git("rev-parse", COMMIT)
 
-    # Walk back from the commit until we find one the remote already has, then
-    # replay the commits in between oldest-first. Each push leaves the remote
-    # holding the previous commit, so the next one fast-forwards normally --
-    # which is why a run of local commits works, and why a single push of the
-    # tip would fail.
-    remote = call("GET", f"{API}/git/ref/heads/{BRANCH}")["object"]["sha"]
-    chain = []
-    cursor = commit
-    while cursor != remote:
-        chain.append(cursor)
-        # A root commit has no parent; `rev-parse <sha>^` fails there. Stop at it
-        # rather than crash -- if the remote is not in this history, the guard
-        # inside push_one will refuse, which is the honest outcome.
-        parent = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{cursor}^"],
-            cwd=r"D:\AIreader\PaperAI-PoC", capture_output=True, text=True,
-        ).stdout.strip()
-        if not parent:
-            raise SystemExit(
-                f"reached the root commit at {cursor[:7]} without meeting the\n"
-                f"remote ({remote[:7]}). The histories are unrelated, or the remote\n"
-                f"is on a branch this does not descend from. Not pushing."
-            )
-        cursor = parent
-    chain.reverse()
+    # Find where to start.
+    #
+    # Normally that is "walk back until a commit the remote already has". But
+    # every API push yields a new server-side SHA for the same tree, so the
+    # remote's HEAD may be a commit git has never heard of -- walking by SHA
+    # would run to the root commit and fail. So the remote HEAD is recognised by
+    # its *tree*: a commit is its tree plus its parents, so an equal tree means
+    # equal content, and the first local commit with that tree is the right
+    # starting point.
+    #
+    # If no local commit carries the remote's tree, there is nothing to build
+    # on and the push is refused rather than forced.
+    remote_ref = call("GET", f"{API}/git/ref/heads/{BRANCH}")
+    remote_sha = remote_ref["object"]["sha"]
+    remote_tree = call("GET", f"{API}/git/commits/{remote_sha}")["tree"]["sha"]
+    print(f"remote  {remote_sha}  tree {remote_tree[:7]}")
 
+    base = subprocess.run(
+        ["git", "log", "--all", "--format=%H", f"--find-object={remote_tree}"],
+        cwd=r"D:\AIreader\PaperAI-PoC", capture_output=True, text=True,
+    ).stdout.strip().splitlines()
+    base = [sha for sha in base if git("rev-parse", f"{sha}^{{tree}}") == remote_tree]
+    if not base:
+        base = [sha for sha in git("log", "--all", "--format=%H").splitlines()
+                if git("rev-parse", f"{sha}^{{tree}}") == remote_tree]
+
+    if not base:
+        raise SystemExit(
+            f"no local commit has the remote's tree ({remote_tree[:7]}).\n"
+            f"  remote HEAD {remote_sha[:7]}\n"
+            "The remote holds work that is not in this repository's history, so\n"
+            "there is nothing to fast-forward from. Fetch and reconcile first."
+        )
+
+    base_sha = base[0]
+    print(f"base    {base_sha}  (same tree as the remote's HEAD)")
+
+    # The commits to replay: everything after the base, oldest-first. Each push
+    # leaves the remote holding the previous commit, so the next one
+    # fast-forwards normally.
+    chain = git("rev-list", "--reverse", f"{base_sha}..{commit}").splitlines()
     if not chain:
-        print(f"remote is already at {commit[:7]}; nothing to push")
+        print("nothing to push; the remote already has this content")
         return
 
-    print(f"{len(chain)} commit(s) to push, oldest first")
+    print(f"{len(chain)} commit(s) to push, oldest first\n")
     for sha in chain:
         push_one(sha)
-        print(f"\npushed {sha[:7]} as {call('GET', f'{API}/git/ref/heads/{BRANCH}')['object']['sha'][:7]}")
+        now = call("GET", f"{API}/git/ref/heads/{BRANCH}")["object"]["sha"]
+        print(f"  -> remote is now {now[:7]}")
 
 
 if __name__ == "__main__":
