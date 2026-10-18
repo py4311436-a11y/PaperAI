@@ -31,10 +31,12 @@ import {
 } from "./ai/context-builder";
 import {
   buildMemoryDocument,
+  chunkImagePrompt,
   chunkMessages,
   memoryContextBlock,
   mergePrompt,
   planChunks,
+  planImageChunks,
   shouldRemember,
   type ChunkNote,
   type PageText,
@@ -302,6 +304,11 @@ function refreshVisionWarning(): void {
 }
 
 let activeProfileId: string | null = null;
+
+/** The profile currently selected, or undefined before settings have loaded. */
+function activeProfile(): ProfileStatus | undefined {
+  return cachedProfiles.find((p) => p.id === activeProfileId);
+}
 /**
  * The open document's reading memory, if it has one.
  *
@@ -590,6 +597,9 @@ async function sendWithMode(
   // they want is to ask it again, not to go hunting for a setting.
   if (mode === "whole-document" && built.stats.pages_sent.length === 0) {
     toast("这篇文档没有可提取的文字（扫描件），已停止发送", "warn");
+    // Record it so the memory row can offer the thing that actually makes this
+    // document cheap to keep asking about.
+    panel.markScannedDocument();
     panel.setHint(
       "全文无可提取文字——这是扫描件，文字管线对图片页无能为力。" +
         "已为你切换到「整篇图片」模式，直接再问一次即可：每页会作为图像发送，视觉模型可以读图。" +
@@ -612,6 +622,11 @@ async function sendWithMode(
     contextLabel: memoryContext() ? `${built.label} · 含阅读笔记` : built.label,
     stats: built.stats,
     attachments,
+    // The active provider's per-image charge, when it publishes one, so the
+    // transcript can show what the images cost instead of just how many there
+    // were. Undefined for providers that price by image content — the display
+    // then says the cost is theirs rather than inventing a number.
+    imageTokens: activeProfile()?.image_tokens,
   });
   renderChat();
 
@@ -901,7 +916,12 @@ async function generateMemory(): Promise<void> {
 
     const chunks = planChunks(all);
     if (!chunks.length) {
-      toast("这份 PDF 没有可提取的文字，无法生成笔记", "warn");
+      // No extractable text anywhere: a scanned paper. The text path cannot
+      // help, but the notes are most valuable exactly here — they are what lets
+      // later questions be text-only instead of re-sending every page image.
+      // So fall back to reading the pages as images, same output contract, so
+      // the merge pass and the sidecar format are unchanged.
+      await generateMemoryFromImages(total, currentName || "未命名文档");
       return;
     }
 
@@ -947,6 +967,77 @@ async function generateMemory(): Promise<void> {
     memoryBusy = false;
     panel.setMemoryBusy(false);
   }
+}
+
+/**
+ * Generate reading notes for a document with no extractable text.
+ *
+ * This is the payoff for a scanned paper: the notes are what make later
+ * questions cheap. Once they exist, a question can use the text path against
+ * the notes instead of re-sending every page image — a few hundred tokens
+ * against ~2.7k for seven pages.
+ *
+ * It costs the images once. That is the trade, and it is why this only runs
+ * when the user asks for it rather than automatically on open.
+ *
+ * Runs from the caller's try/finally so the busy flag is reset in one place.
+ */
+async function generateMemoryFromImages(total: number, title: string): Promise<void> {
+  const chunks = planImageChunks(total);
+  const notes: ChunkNote[] = [];
+
+  for (const [i, chunk] of chunks.entries()) {
+    panel.setMemoryBusy(
+      true,
+      `正在读图生成笔记 ${i + 1}/${chunks.length}（第 ${chunk.from}–${chunk.to} 页）…`
+    );
+
+    // Rendered from the document, not from painted canvases — a page the user
+    // has not scrolled to still has to be readable here.
+    const urls: string[] = [];
+    for (let p = chunk.from; p <= chunk.to; p++) {
+      const shot = await adapter.renderPageImage(p, PAGE_IMAGE_MAX_EDGE);
+      urls.push(shot.url);
+    }
+
+    const text = await askOnce([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: chunkImagePrompt(chunk.from, chunk.to, total) },
+          ...urls.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+        ],
+      },
+    ]);
+    if (!text.trim()) {
+      toast(
+        `第 ${chunk.from}–${chunk.to} 页没有得到内容，已停止（未覆盖原有笔记）`,
+        "error"
+      );
+      return;
+    }
+    notes.push({ from: chunk.from, to: chunk.to, note: text });
+  }
+
+  panel.setMemoryBusy(true, "正在合并全文概要…");
+  const overview = await askOnce([{ role: "user", content: mergePrompt(notes, total) }]);
+
+  const profile = activeProfile();
+  const body = buildMemoryDocument({
+    docTitle: title,
+    model: profile?.model ?? "未知模型",
+    totalPages: total,
+    notes,
+    overview,
+    now: new Date(),
+  });
+  if (!currentPath) return;
+  currentMemory = await bridge.aiMemoryWrite(currentPath, body);
+  panel.setMemoryState(currentMemory);
+  toast(
+    `阅读笔记已保存（按图片读取）：${chunks.length} 段 · ${currentMemory.path}`,
+    "success"
+  );
 }
 
 /**

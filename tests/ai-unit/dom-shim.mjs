@@ -201,6 +201,28 @@ export class ShimNode {
       contains(n) {
         return self.className.split(/\s+/).includes(n);
       },
+      /**
+       * Real DOM `toggle(name, force?)`.
+       *
+       * Added when `setMemoryState` started using it: the shim threw
+       * "classList.toggle is not a function", which fails the *test* rather
+       * than the assertion inside it. That is the failure mode this project has
+       * been bitten by before (0.5.1 `childElementCount`, `replaceChildren`) —
+       * a missing shim method means the test never reaches what it meant to
+       * check. It failed loudly this time, but the fix is still the shim: the
+       * real DOM has `toggle`, so code may use it.
+       *
+       * The two-argument form is what the panel uses, so it is implemented
+       * exactly: `force` decides the result instead of flipping.
+       */
+      toggle(name, force) {
+        const set = new Set(self.className.split(/\s+/).filter(Boolean));
+        const want = force === undefined ? !set.has(name) : Boolean(force);
+        if (want) set.add(name);
+        else set.delete(name);
+        self.className = [...set].join(" ");
+        return want;
+      },
     };
   }
 

@@ -105,6 +105,8 @@ export class ChatPanel {
   private modelListOwner: string | null = null;
   /** A memory generation is running; the button must not be re-enterable. */
   private memoryBusy = false;
+  /** Whether this document was found to have no extractable text. */
+  private scanned = false;
 
   constructor(private deps: ChatPanelDeps) {
     this.root = document.createElement("aside");
@@ -500,6 +502,27 @@ export class ChatPanel {
   }
 
   /**
+   * Note that this document has no extractable text at all.
+   *
+   * Called when the app discovers it, which is the only moment it knows. The
+   * memory line is the right place to say it: for a scanned paper, generating
+   * notes is not a convenience — it is what makes later questions cost a few
+   * hundred tokens instead of re-sending every page as an image. Without the
+   * prompt the user pays full price on every question and has no way to learn
+   * there was an alternative.
+   */
+  markScannedDocument(): void {
+    this.scanned = true;
+    if (!this.memoryState.textContent?.startsWith("已启用")) {
+      this.memoryState.textContent = "扫描件 · 建议先生成笔记（后续提问不必重发图片）";
+      this.memoryState.classList.add("on");
+    }
+    this.memoryBtn.textContent = "生成笔记";
+    this.memoryBtn.title =
+      "这份 PDF 没有可提取的文字，会按图片读取全文并生成笔记。生成后追问可直接用文字，不必每次重发整篇图片。";
+  }
+
+  /**
    * Show what reading memory this document has.
    *
    * The state line is the honest bit: whether the notes are being folded into
@@ -509,9 +532,14 @@ export class ChatPanel {
   setMemoryState(memory: MemoryFile | null): void {
     this.memoryBusy = false;
     if (!memory) {
-      this.memoryState.textContent = "无（超长文档可先生成）";
-      this.memoryState.classList.remove("on");
-      this.memoryBtn.textContent = "生成";
+      // A scanned document keeps its own message: "无（超长文档可先生成）"
+      // describes a long paper with text, which is a different situation with a
+      // different reason to generate notes.
+      this.memoryState.textContent = this.scanned
+        ? "扫描件 · 建议先生成笔记（后续提问不必重发图片）"
+        : "无（超长文档可先生成）";
+      this.memoryState.classList.toggle("on", this.scanned);
+      this.memoryBtn.textContent = this.scanned ? "生成笔记" : "生成";
       this.memoryBtn.disabled = false;
       return;
     }

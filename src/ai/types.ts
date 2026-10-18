@@ -30,6 +30,14 @@ export interface ProfileStatus {
   /** Plain HTTP to this machine — shown in the UI as an explicit warning. */
   is_loopback_insecure: boolean;
   sends_session_header: boolean;
+  /**
+   * Per-image token charge, when the provider publishes a flat one.
+   *
+   * Absent for providers whose image cost depends on the image itself, which is
+   * most of them. The UI must say "unknown" rather than invent a number — see
+   * the note on `ContextStats.images`.
+   */
+  image_tokens?: number;
 }
 
 /**

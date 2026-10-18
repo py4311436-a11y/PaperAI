@@ -31,6 +31,15 @@ pub struct AiProfile {
     /// credential — so nothing here is a secret.
     #[serde(default)]
     pub sends_session_header: bool,
+    /// Per-image token charge, where the provider documents one.
+    ///
+    /// `None` means unknown — and unknown must stay `None`. A number here is
+    /// shown to the user as the cost of an image, so a guess would be a lie with
+    /// a decimal point on it. Only providers that publish a flat per-image cap
+    /// get one; providers that tile by resolution cannot be summarised by a
+    /// single number at all, because the cost depends on the image.
+    #[serde(default)]
+    pub image_tokens: Option<u32>,
 }
 
 /// What the UI is allowed to know about a profile's credential state.
@@ -46,6 +55,12 @@ pub struct ProfileStatus {
     /// Loopback + plain HTTP: shown in the UI as "本地非加密连接".
     pub is_loopback_insecure: bool,
     pub sends_session_header: bool,
+    /// Per-image token charge, when the provider documents one.
+    ///
+    /// Surfaced so the UI can turn "7 张截图" into a number the user can act on.
+    /// `None` for providers whose image cost depends on the image itself, which
+    /// is most of them — see the note on `AiProfile`.
+    pub image_tokens: Option<u32>,
 }
 
 /// One entry from a provider's model catalogue.

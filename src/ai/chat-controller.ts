@@ -169,6 +169,14 @@ export class ChatController {
     stats: ContextStats;
     /** Screenshots sent with this question, kept for the transcript. */
     attachments?: ImageAttachment[];
+    /**
+     * The active provider's per-image token charge, when it publishes one.
+     *
+     * Passed in rather than looked up here: the controller has no business
+     * reading provider settings, and the value is only used to render the
+     * transcript line.
+     */
+    imageTokens?: number;
   }): Promise<string | null> {
     const s = this.session();
     if (!s) return null;
@@ -183,7 +191,7 @@ export class ChatController {
       role: "user",
       content: opts.question,
       phase: "completed",
-      contextLabel: `${opts.contextLabel} · ${describeStats(opts.stats)}`,
+      contextLabel: `${opts.contextLabel} · ${describeStats(opts.stats, opts.imageTokens)}`,
       // Shown in the transcript because a question whose only subject is a
       // figure is unreadable later without the figure.
       attachments: attachments.length ? attachments : undefined,
@@ -413,12 +421,26 @@ function questionWithImages(
   return parts;
 }
 
-function describeStats(s: ContextStats): string {
+/**
+ * Human-readable breakdown of what a request carried.
+ *
+ * The image part is the reason this is not a one-liner. A page image costs the
+ * provider's per-image charge, which is not derivable from the base64 length —
+ * the same 200 KB JPEG can cost 384 tokens or 1700 depending on whether the
+ * provider uses a flat cap or tiles by resolution.
+ *
+ * So:
+ *  - provider publishes a flat cap  -> show the arithmetic ("7 张图片 ≈ 2688 token")
+ *  - provider does not              -> show the count and say the cost is theirs
+ *  - never                           -> a made-up number
+ *
+ * The old version showed only `chars / tokens`, which read "9 字 / 约 3 tokens"
+ * next to seven images and a request that actually cost ~3000. A number that
+ * far off is worse than no number: it makes the expensive path look free.
+ */
+function describeStats(s: ContextStats, imageTokens?: number): string {
   const base = `${s.chars} 字 / 约 ${s.approx_tokens} tokens`;
-  // Images are counted, never folded into the token estimate: their cost is set
-  // by the provider's per-image cap, not by anything measurable locally, so a
-  // number here would look authoritative and be wrong.
-  const images = s.images ? ` · ${s.images} 张截图` : "";
+  const images = describeImages(s.images, imageTokens);
   if (!s.chars && !s.images) return "无文献内容";
   // Say so when the document did not fit. Without this the transcript claims a
   // full-paper question was answered from the full paper.
@@ -427,6 +449,24 @@ function describeStats(s: ContextStats): string {
     return `${base}${images} · 仅第 ${s.pages_sent[0]}–${last} 页 / 共 ${s.pages_total} 页`;
   }
   return base + images;
+}
+
+/**
+ * The image part of the breakdown.
+ *
+ * When the per-image charge is known, the images are folded into a total and
+ * shown as their own line — because they dominate the request and burying them
+ * in a single figure hides the thing the user is paying for. When it is not
+ * known, the count is shown with a plain statement that the cost is the
+ * provider's, which is honest and still tells the user seven images went out.
+ */
+function describeImages(count: number, imageTokens?: number): string {
+  if (!count) return "";
+  if (imageTokens === undefined || !Number.isFinite(imageTokens) || imageTokens <= 0) {
+    return ` · ${count} 张图片（成本由提供商按图计费，本地无法估算）`;
+  }
+  const total = count * imageTokens;
+  return ` · ${count} 张图片 ≈ ${total} token（按每张 ${imageTokens}）`;
 }
 
 /** Tauri rejects with a plain string or `{code,message}`; normalise both. */

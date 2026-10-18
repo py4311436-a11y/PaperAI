@@ -1142,3 +1142,75 @@ test("pagesInHistory and history describe the same window", async () => {
   assert.deepEqual(c.pagesInHistory(), [], "aged out — the pages must be sent again");
   assert.ok(!c.history().some((m) => typeof m.content !== "string"), "and no images in history");
 });
+
+/**
+ * The transcript line must show what the images cost, not just that there were
+ * some.
+ *
+ * Before this, seven page images produced "9 字 / 约 3 tokens" — a request that
+ * actually cost ~2.7k tokens reported as 3. A number that far off is worse than
+ * none: it makes the most expensive path in the app look free.
+ */
+test("the transcript shows the image cost when the provider publishes one", async () => {
+  const { c } = makeController(async (emit) => {
+    emit({ type: "started" });
+    emit({ type: "delta", text: "答" });
+    emit({ type: "completed", finish_reason: "stop" });
+  });
+  c.openDocument("doc-1");
+  c.setProfileId("p1");
+  await c.send({
+    question: "概述",
+    messages: [],
+    contextLabel: "整篇图片",
+    stats: { ...built.stats, images: 7 },
+    imageTokens: 384,
+  });
+
+  const label = c.turns()[0].contextLabel;
+  assert.ok(label.includes("2688"), `expected 7 × 384: ${label}`);
+  assert.ok(label.includes("384"), label);
+});
+
+test("an unknown per-image cost is stated as unknown, never guessed", async () => {
+  // Zhipu and the OpenCode gateway do not publish a flat cap. Inventing one
+  // would put a confident, wrong number in front of the user.
+  const { c } = makeController(async (emit) => {
+    emit({ type: "started" });
+    emit({ type: "delta", text: "答" });
+    emit({ type: "completed", finish_reason: "stop" });
+  });
+  c.openDocument("doc-1");
+  c.setProfileId("p1");
+  await c.send({
+    question: "概述",
+    messages: [],
+    contextLabel: "整篇图片",
+    stats: { ...built.stats, images: 7 },
+    // no imageTokens
+  });
+
+  const label = c.turns()[0].contextLabel;
+  assert.ok(label.includes("7 张图片"), label);
+  assert.ok(label.includes("无法估算"), `must say the cost is unknown: ${label}`);
+  assert.ok(!label.includes("2688"), "must not invent the DeepSeek figure");
+});
+
+test("an image count of zero adds nothing to the line", async () => {
+  // Text-only questions must not grow a meaningless "0 张图片".
+  const { c } = makeController(async (emit) => {
+    emit({ type: "started" });
+    emit({ type: "delta", text: "答" });
+    emit({ type: "completed", finish_reason: "stop" });
+  });
+  c.openDocument("doc-1");
+  c.setProfileId("p1");
+  await c.send({
+    question: "概述",
+    messages: [],
+    contextLabel: "第 1 页",
+    stats: { ...built.stats, images: 0 },
+    imageTokens: 384,
+  });
+  assert.ok(!c.turns()[0].contextLabel.includes("张图片"), c.turns()[0].contextLabel);
+});

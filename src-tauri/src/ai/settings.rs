@@ -38,6 +38,20 @@ pub fn presets() -> Vec<AiProfile> {
 /// The model default is `deepseek-flash`: DeepSeek's docs now say to use that
 /// name, and the older `deepseek-chat` is no longer listed. It remains a
 /// *default* — the field is editable and nothing is hard-coded downstream.
+///
+/// `image_tokens` is 384 because DeepSeek documents a hard ceiling of 384 tokens
+/// per image: every image is resized to roughly 800×800 worth of pixels before
+/// inference, so a 2000×2000 and a 5000×5000 image cost exactly the same. That
+/// flatness is what makes it safe to show as a number — a provider that tiled by
+/// resolution could not be summarised by one figure, because the cost would
+/// depend on the image.
+///
+/// Note the vision gate this does NOT encode: only `deepseek-v4-flash-vision-exp`
+/// accepts images, and every other DeepSeek model answers a flat 400. Which
+/// models take images is learned from refusals at runtime
+/// (`src/ai/vision-support.ts`) rather than guessed here, so the default stays a
+/// default and a user on a text-only model is warned from the provider's own
+/// message rather than from a stale list.
 pub fn deepseek_preset() -> AiProfile {
     AiProfile {
         id: "deepseek".into(),
@@ -47,6 +61,7 @@ pub fn deepseek_preset() -> AiProfile {
         credential_id: "deepseek".into(),
         is_default: true,
         sends_session_header: false,
+        image_tokens: Some(384),
     }
 }
 
@@ -112,6 +127,11 @@ pub fn zhipu_preset() -> AiProfile {
         // Zhipu does not ask for a conversation header; that is an OpenCode
         // gateway requirement (see `sends_session_header` on the type).
         sends_session_header: false,
+        // No figure. Zhipu does not publish a flat per-image cap, and GLM-4V
+        // prices by tiling, so the cost of an image depends on the image. A
+        // number here would look authoritative and be wrong, which is worse
+        // than saying nothing.
+        image_tokens: None,
     }
 }
 
@@ -130,6 +150,9 @@ pub fn opencode_go_preset() -> AiProfile {
         credential_id: "opencode-go".into(),
         is_default: false,
         sends_session_header: true,
+        // Unknown: the gateway fronts several models with different vision
+        // pricing, and nothing published reduces them to one number.
+        image_tokens: None,
     }
 }
 
@@ -155,6 +178,8 @@ pub fn opencode_zen_preset() -> AiProfile {
         credential_id: "opencode-zen".into(),
         is_default: false,
         sends_session_header: true,
+        // Unknown, same reasoning as OpenCode Go.
+        image_tokens: None,
     }
 }
 
@@ -313,6 +338,7 @@ pub fn status_of(p: &AiProfile) -> ProfileStatus {
         has_key: secrets::has_secret(&p.credential_id),
         is_loopback_insecure: is_loopback_insecure(&p.base_url),
         sends_session_header: p.sends_session_header,
+        image_tokens: p.image_tokens,
     }
 }
 

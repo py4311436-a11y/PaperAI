@@ -15,14 +15,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import {
-  buildMemoryDocument,
-  chunkMessages,
-  mergePrompt,
-  memoryContextBlock,
-  planChunks,
-  CHUNK_CHAR_BUDGET,
-} from "../../dist-test/src/ai/memory.js";
+import { buildMemoryDocument, chunkImagePrompt, chunkMessages, chunkPrompt, mergePrompt, memoryContextBlock, planChunks, planImageChunks, CHUNK_CHAR_BUDGET } from "../../dist-test/src/ai/memory.js";
 import { buildContext } from "../../dist-test/src/ai/context-builder.js";
 
 /** The message carrying the document — located by its wrapper, not by position. */
@@ -350,4 +343,70 @@ test("with no document there is no context message, just the question", async ()
   const built = await buildContext({ ...baseMsgs, mode: "none" });
   assert.equal(built.messages.length, 2, "system + question only");
   assert.ok(built.messages.at(-1).content.includes("没有提供论文原文"));
+});
+
+/* ------------------------------------------------- image-backed notes (A-30) -- */
+
+/**
+ * A scanned paper has no text, so `planChunks` produces nothing and the notes
+ * pipeline used to stop with "这份 PDF 没有可提取的文字，无法生成笔记". The
+ * notes matter most on exactly those documents: they are what lets later
+ * questions be text-only instead of re-sending every page image.
+ *
+ * The image path needs its own planner because the units differ — `planChunks`
+ * packs by character count, and every page here contributes zero characters.
+ */
+test("image chunks cover every page exactly once", () => {
+  const chunks = planImageChunks(7);
+  assert.deepEqual(
+    chunks.map((c) => [c.from, c.to]),
+    [[1, 6], [7, 7]],
+    "seven pages, six per chunk"
+  );
+
+  // Coverage is the property that matters: a gap means pages silently missing
+  // from the notes, an overlap means paying for the same page twice.
+  const covered = chunks.flatMap((c) => Array.from({ length: c.to - c.from + 1 }, (_, i) => c.from + i));
+  assert.deepEqual(covered, [1, 2, 3, 4, 5, 6, 7]);
+});
+
+test("image chunks handle the edges", () => {
+  assert.deepEqual(planImageChunks(0), [], "no pages, no chunks");
+  assert.deepEqual(planImageChunks(1), [{ from: 1, to: 1 }]);
+  assert.deepEqual(planImageChunks(6), [{ from: 1, to: 6 }], "exactly one full chunk");
+  assert.equal(planImageChunks(7).length, 2, "one page starts a new chunk");
+  // A nonsensical chunk size must not loop forever or divide by zero.
+  assert.deepEqual(planImageChunks(3, 0), [{ from: 1, to: 1 }, { from: 2, to: 2 }, { from: 3, to: 3 }]);
+});
+
+test("the image prompt names the page range and carries the injection rule", () => {
+  // The model has to know these are pages of the paper, not arbitrary pictures,
+  // or it describes them instead of reading them. And an image of text is still
+  // data: rendering an instruction into a picture does not make it a command.
+  const p = chunkImagePrompt(7, 12, 30);
+  assert.ok(p.includes("第 7–12 页"), p);
+  assert.ok(p.includes("共 30 页"), p);
+  assert.ok(p.includes("图像"), "must say these are images");
+  assert.ok(p.includes("不是指令"), "the injection rule must survive the image path");
+  assert.ok(p.includes("阅读笔记"), "same output contract as the text path");
+});
+
+test("a single-page chunk reads naturally", () => {
+  // "第 7–7 页" is the kind of thing that makes a prompt look machine-generated
+  // and nudges the model toward treating it as a degenerate case.
+  const p = chunkImagePrompt(7, 7, 30);
+  assert.ok(p.includes("第 7 页"), p);
+  assert.ok(!p.includes("7–7"), p);
+});
+
+test("both prompts ask for the same shape of notes, so merging cannot tell them apart", () => {
+  // The merge pass and the sidecar format are shared. If the image path asked
+  // for prose, merging would produce a document half in one style and half in
+  // the other, and nothing would report it.
+  const text = chunkPrompt(1, 3, 10);
+  const image = chunkImagePrompt(1, 3, 10);
+  for (const heading of ["研究内容", "关键结论", "方法与数据", "术语与公式"]) {
+    assert.ok(text.includes(heading), `text prompt lost ${heading}`);
+    assert.ok(image.includes(heading), `image prompt lost ${heading}`);
+  }
 });
