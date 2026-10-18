@@ -85,15 +85,48 @@ def main() -> None:
     print(f"tree    {tree}")
 
     # 1. Fast-forward check, before touching anything.
+    #
+    #    This also handles the case where the same content is already on the
+    #    remote under a different SHA. A commit pushed through this script is
+    #    rebuilt server-side, so it gets a new SHA -- the tree and message
+    #    survive, but the original author/committer metadata and any signature do
+    #    not. The next commit then has a parent the remote has never seen, and
+    #    looks like a divergence.
+    #
+    #    Rather than treat that as a conflict, ask whether the remote HEAD is
+    #    this commit's *parent*, just spelled differently: compare the PARENT's
+    #    tree. If it matches, the parent is already on the remote and we can
+    #    simply point at the remote's SHA. Comparing this commit's own tree would
+    #    be wrong -- it is the work being pushed, so it naturally differs, and the
+    #    check would refuse everything.
+    #
+    #    The tree is the whole test. A commit is exactly its tree plus its
+    #    parents, and the message is already verified separately when it is
+    #    created. Comparing text here would only add a way to fail on line-ending
+    #    normalisation.
     remote = call("GET", f"{API}/git/ref/heads/{BRANCH}")
     remote_sha = remote["object"]["sha"]
+    remote_head = call("GET", f"{API}/git/commits/{remote_sha}")
     print(f"remote  {remote_sha}")
+
     if remote_sha != parent:
-        raise SystemExit(
-            f"NOT a fast-forward: remote is {remote_sha[:7]}, parent is {parent[:7]}.\n"
-            "Someone else moved the branch, or the remote is on a different line. "
-            "Fetch and inspect before pushing."
-        )
+        parent_tree = git("rev-parse", f"{parent}^{{tree}}")
+        remote_tree = remote_head.get("tree", {}).get("sha")
+        if remote_tree == parent_tree:
+            print(
+                "\nremote HEAD is this commit's parent, under a different SHA\n"
+                f"  (remote {remote_sha[:7]} and local {parent[:7]} are the same tree)\n"
+                "using the remote SHA as the parent"
+            )
+            parent = remote_sha
+        else:
+            raise SystemExit(
+                f"NOT a fast-forward: remote is {remote_sha[:7]}, parent is {parent[:7]}.\n"
+                f"  remote tree {remote_tree}\n"
+                f"  parent tree {parent_tree}\n"
+                "The trees differ, so the branch moved in a way this script did not\n"
+                "make. Fetch and inspect before pushing."
+            )
 
     # 2. Upload every blob this commit touches and verify the SHA matches.
     #
