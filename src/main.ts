@@ -1264,8 +1264,7 @@ if (IS_AUTOMATION) {
         return adapter.currentPage;
       },
       getPageText: (p: number) => adapter.getPageText(p),
-      pageHasText: (p: number) => adapter.pageHasText(p),
-      open: (p: string) => openPath(p),
+      pageHasText: (p: number) => adapter.pageHasText(p),      open: (p: string) => openPath(p),
       openRaw: (p: string) => openPath(p),
       loadByArrayBuffer: async (buf: ArrayBuffer, name: string) => {
         await adapter.open(new Uint8Array(buf), name);

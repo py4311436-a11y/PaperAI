@@ -207,6 +207,62 @@ and the right behaviour.
 
 ---
 
+### A-26 — FIXED in 0.6.3: page text extraction depended on scroll position
+
+The panel reported "未能提取到文本（共 N 页）" for a document with text on
+every page.
+
+`getPageText()` read the rendered `.textLayer` DOM element. PDF.js builds a
+page's text layer inside `PDFPageView#draw()` — which runs only for pages it has
+actually rendered — and rendering is virtualised by visibility
+(`pdf_viewer.mjs:7143`, the `if (!this.textLayer && ...)` branch). So any page
+the user had not scrolled to had no text layer and read as empty: exactly the
+same result as a genuinely scanned page. Opening a paper and asking about it
+before the renderer caught up produced a document-wide failure, and the panel
+had no way to tell "scanned" from "not rendered yet".
+
+**Why no test caught it.** Every existing test supplied its own fake
+`getPageText`, so the adapter's own extraction was never exercised end to end.
+The code under test was the fake. That is the same shape as the DOM-shim gaps
+in 0.5.1 and 0.6.3: a test that cannot reach the real path passes for the wrong
+reason.
+
+**The fix.** `getPageText()` now asks the document (`page.getTextContent()`),
+which has no dependency on rendering. It is also the source the text layer is
+rendered from, so "matches what the user can select" still holds — the layer is
+a positioned view of the same content, not different content. Results are
+cached per page, because `whole-document` walks every page on every question and
+each call is a worker round-trip; the cache is cleared on close so it cannot
+outlive its document.
+
+**Composition is a separate pure module** (`src/pdf/text-compose.ts`), so it is
+testable in plain Node with no browser and no worker — importing it through the
+adapter would have dragged in `pdfjs-dist`, whose Node support is the
+`legacy` entry point only. That separation is what makes the tests real rather
+than decorative.
+
+**Test inputs are real.** `scripts/capture-text-fixture.mjs` captures actual
+`getTextContent()` output from the fixture PDFs, and the tests run against it.
+Synthetic items only prove the function handles the shapes its author thought
+of. Two behaviours were found this way and pinned, both verified against what
+the DOM implementation would have produced rather than assumed:
+  - a blank line is an empty run following a line that already ended (two
+    `<br>`s in the layer) — dropping it merges paragraphs;
+  - a space goes between runs only between *Latin* word characters. An
+    unconditional space puts one between two Chinese characters, which is
+    visible and wrong in a tool whose point is reading Chinese papers.
+
+Both were negative-controlled: breaking either fails exactly its own
+assertions.
+
+**Verified end to end** by `scripts/verify-text-extraction.mjs`, which walks
+every page of all five fixtures with no viewer and nothing rendered — the state
+a document is in the moment it opens. All pages yield text.
+
+Note the residual case this does not fix: a genuinely image-only PDF still
+extracts nothing, and the panel still says so. That is correct behaviour, not a
+bug — but the message now means only one thing instead of two.
+
 ### A-25 — FIXED in 0.6.3: the composer swallowed Enter from the input method
 
 A question typed into the composer would not send. Nothing was wrong with
@@ -670,3 +726,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | — | `secrets.rs` compared an `HRESULT` against a raw Win32 code, so a missing key surfaced as `ai_secret_store` instead of `ai_no_key` |
 | A-24 | The Zhipu free preset defaulted to a retired model id, and a 401-based probe could not have caught it |
 | A-25 | The composer treated an input method's Enter (committing a candidate) as a send, making it unusable in Chinese |
+| A-26 | Page text was read from the rendered DOM text layer, so extraction depended on scroll position and failed on freshly opened documents |

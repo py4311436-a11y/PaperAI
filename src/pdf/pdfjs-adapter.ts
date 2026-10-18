@@ -13,6 +13,8 @@
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
+import { textFromContentItems } from "./text-compose";
+
 export const PDFJS_VERSION: string = (pdfjsLib as unknown as { version: string }).version;
 
 /* -------------------------------------------------------------------------- */
@@ -154,6 +156,15 @@ export class PdfjsAdapter {
   private pdfViewer!: InstanceType<PdfViewerModule["PDFViewer"]>;
 
   private doc: PDFDocumentProxy | null = null;
+  /**
+   * Extracted text per page, so a reading session does not re-fetch it.
+   *
+   * `whole-document` mode walks every page on every question, and
+   * `getTextContent()` is a worker round-trip each time. Cleared when a
+   * document is closed, so the cache can never outlive the document it came
+   * from.
+   */
+  private pageText = new Map<number, string>();
   /** AnnotationEditorUIManager — captured via EventBus, NOT exported by the lib. */
   private uiManager: any = null;
   private tool: ToolMode = "select";
@@ -298,6 +309,7 @@ export class PdfjsAdapter {
         /* ignore */
       }
       this.doc = null;
+      this.pageText.clear();
     }
     this.uiManager = null;
   }
@@ -643,53 +655,61 @@ export class PdfjsAdapter {
    * Extracted text of one page (1-based), for AI context building.
    *
    * Read-only and side-effect free: it never changes the selection, the tool or
-   * the scroll position. Returns "" when the page has no text layer (a scanned
+   * the scroll position. Returns "" when the page carries no text (a scanned
    * page), which the caller must surface as "no selectable text" rather than
    * pretending OCR happened.
    *
-   * The text comes from the rendered text layer rather than `getTextContent()`
-   * so it matches exactly what the user can select on screen.
+   * **This reads the document, not the rendered DOM.** It used to read the
+   * `.textLayer` element, and that was the bug: PDF.js builds a page's text
+   * layer inside `PDFPageView#draw()`, which only runs for pages it has actually
+   * rendered, and rendering is virtualised by visibility. So a page the user had
+   * not scrolled to had no text layer and read as empty — the same result as a
+   * genuinely scanned page. Opening a paper and asking about it before the
+   * renderer caught up produced "未能提取到文本" for a document with text on
+   * every page, which is exactly the failure that was reported.
+   *
+   * `getTextContent()` asks the document directly and has no such dependency:
+   * the answer does not change with scroll position, zoom, or how long the
+   * document has been open. It is also the source the text layer is rendered
+   * from, so "matches what the user can select" still holds — the layer is a
+   * positioned view of this same content, not different content.
+   *
+   * Results are cached per page: `whole-document` mode walks every page, and
+   * `getTextContent()` is a worker round-trip that would otherwise be repeated
+   * on every question in a reading session.
    */
-  getPageText(pageNumber: number): string {
-    const pg = this.container.querySelector<HTMLElement>(`.page[data-page-number="${pageNumber}"]`);
-    if (!pg) return "";
-    const layer = pg.querySelector<HTMLElement>(".textLayer");
-    if (!layer) return "";
+  async getPageText(pageNumber: number): Promise<string> {
+    const cached = this.pageText.get(pageNumber);
+    if (cached !== undefined) return cached;
 
-    // PDF.js puts one span per text run; joining with a space keeps words from
-    // running together when a run boundary falls mid-sentence. Line breaks come
-    // from the `br` elements the layer inserts.
-    const parts: string[] = [];
-    const walk = (node: Node) => {
-      for (const child of Array.from(node.childNodes)) {
-        if (child.nodeType === 3) {
-          const t = child.textContent ?? "";
-          if (t.trim()) parts.push(t);
-        } else if (child.nodeType === 1) {
-          const e = child as HTMLElement;
-          if (e.tagName === "BR") {
-            parts.push("\n");
-          } else if (e.classList.contains("endOfContent")) {
-            // sentinel element, ignores pointer events; no text of its own
-          } else {
-            walk(e);
-          }
-        }
-      }
-    };
-    walk(layer);
-
-    return parts
-      .join(" ")
-      .replace(/ *\n */g, "\n")
-      .replace(/[ \t]{2,}/g, " ")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
+    if (!this.doc) return "";
+    let text = "";
+    try {
+      const page = await this.doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      // `getTextContent()` types its items as a union that includes
+      // marked-content containers, which carry no `str` of their own. Those
+      // only appear when `includeMarkedContent` is set, which this does not
+      // ask for; narrow structurally anyway so the union cannot reach the
+      // composer on the strength of a cast.
+      const items = content.items.filter((i) => "str" in i);
+      text = textFromContentItems(items);
+    } catch (e) {
+      // A page that cannot be read is not a reason to fail the question; the
+      // caller already knows how to report a page with no text.
+      this.diagnostics.log("warn", `getPageText(${pageNumber}): ${String(e)}`);
+    }
+    this.pageText.set(pageNumber, text);
+    return text;
   }
 
-  /** True when this page has no extractable text (scanned / empty page). */
-  pageHasText(pageNumber: number): boolean {
-    return this.getPageText(pageNumber).length > 0;
+  /**
+   * True when this page carries no extractable text (scanned / empty page).
+   *
+   * Async for the same reason `getPageText` is: it reads the document.
+   */
+  async pageHasText(pageNumber: number): Promise<boolean> {
+    return (await this.getPageText(pageNumber)).length > 0;
   }
 
   /** 1-based page currently at the top of the viewport. */
