@@ -142,7 +142,8 @@ export type ContextMode =
   | "selection"
   | "current-page"
   | "nearby-pages"
-  | "whole-document";
+  | "whole-document"
+  | "whole-document-images";
 
 export interface ContextStats {
   chars: number;

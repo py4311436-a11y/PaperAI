@@ -52,6 +52,7 @@ const suites = [
   { name: "reading memory chunking (A-19)", file: "tests/ai-unit/memory.test.mjs" },
   { name: "page text extraction (A-26)", file: "tests/ai-unit/text-extraction.test.mjs" },
   { name: "ctrl+wheel zoom", file: "tests/ai-unit/wheel-zoom.test.mjs" },
+  { name: "whole-page images (A-28)", file: "tests/ai-unit/whole-page-images.test.mjs" },
 ];
 
 const results = [];

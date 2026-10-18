@@ -1034,3 +1034,51 @@ test("a fully scanned document says so plainly", async () => {
   assert.ok(built.label.includes("未能提取到文本"), built.label);
   assert.deepEqual(built.stats.pages_sent, []);
 });
+
+/**
+ * A genuinely scanned document in whole-document mode.
+ *
+ * The reported symptom: the panel said "未能提取到文本（共 7 页）" and the user
+ * read that as the text-extraction bug still being broken. It was not — that
+ * document has no text on any page (verified: 1 image draw operation per page,
+ * 0 text operations, no encryption), so the empty result was correct.
+ *
+ * What was actually wrong is what the app did next: it sent the question with
+ * nothing attached, so the model could only answer "you have not given me the
+ * paper" — a paid round trip to be told what the app already knew, with no
+ * indication that the screenshot feature is the way forward. `pages_sent` is
+ * what the caller keys off, so it has to stay empty here; these tests pin the
+ * values the decision is made from.
+ */
+test("a fully scanned document in whole-document mode sends nothing and says so", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 7,
+    getPageText: async () => "",
+  });
+  assert.deepEqual(built.stats.pages_sent, [], "nothing to send");
+  // The document text must be genuinely absent, not a placeholder: a stray
+  // wrapper would tell the model there is a document it cannot see.
+  assert.equal(built.messages.find((m) => textOf(m.content).includes("<document_context>")), undefined);
+  assert.equal(built.stats.chars, base.question.length, "only the question's own characters");
+  assert.equal(built.stats.images, 0, "and no images either");
+});
+
+test("a screenshot on a scanned document is what carries the content", async () => {
+  // The reason refusing to send is safe: the attachment path is independent of
+  // text extraction. If these two ever became coupled, a scanned document would
+  // become unusable for questions entirely.
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 7,
+    getPageText: async () => "",
+    attachments: [shot(3)],
+  });
+  assert.equal(built.stats.images, 1, "the screenshot still goes out");
+  const last = built.messages.at(-1);
+  assert.ok(Array.isArray(last.content), "with an image the question becomes a block array");
+  assert.ok(textOf(last.content).includes(base.question));
+});
+

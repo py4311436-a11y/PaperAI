@@ -46,11 +46,12 @@ export interface ChatPanelDeps {
 }
 
 const MODE_LABELS: Record<ContextMode, string> = {
-  "none": "不发送文献",
-  "selection": "选中文字",
+  none: "不发送文献内容",
+  selection: "选中文字",
   "current-page": "当前页",
-  "nearby-pages": "相邻三页",
-  "whole-document": "整篇文章",
+  "nearby-pages": "当前页±1",
+  "whole-document": "整篇文章（文字）",
+  "whole-document-images": "整篇文章（图片）",
 };
 
 const MODE_HINTS: Record<ContextMode, string> = {
@@ -59,7 +60,9 @@ const MODE_HINTS: Record<ContextMode, string> = {
   "current-page": "发送当前页的可提取文字。",
   "nearby-pages": "发送当前页、上一页与下一页的可提取文字。",
   "whole-document":
-    "发送全篇的可提取文字（含页码标记），适合「概述全文」这类问题。论文很长时会超出长度上限，届时只发送前若干页，并会在回答和提示里标明实际范围。",
+    "发送全篇的可提取文字（含页码标记），适合「概述全文」这类问题。论文很长时会超出长度上限，届时只发送前若干页，并会在回答和提示里标明实际范围。扫描件没有可提取文字，那种文档请用「整篇文章（图片）」。",
+  "whole-document-images":
+    "把每一页作为图像发送，适合扫描件——那种文档里根本没有文字可提取。代价是消耗远高于文字（每页约合上千 token），且受页数上限约束，超出的页不会发送并会明确告知。需要支持图片输入的模型。",
 };
 
 export class ChatPanel {
@@ -467,6 +470,33 @@ export class ChatPanel {
   setContextMode(mode: ContextMode): void {
     this.modeSelect.value = mode;
     this.hintEl.textContent = MODE_HINTS[mode];
+  }
+
+  /**
+   * Switch the mode from outside, and run the same path a user click would.
+   *
+   * Exists because there is one moment where the app knows better than the user
+   * which mode to use: a document with no extractable text at all. Setting
+   * `.value` alone would leave the hint showing the mode the user was just told
+   * does not work, so this fires the change handler too.
+   */
+  selectMode(mode: ContextMode): void {
+    if (this.modeSelect.value === mode) return;
+    this.modeSelect.value = mode;
+    this.deps.onContextModeChange(mode);
+    this.hintEl.textContent = MODE_HINTS[mode];
+  }
+
+  /**
+   * Replace the mode hint with a one-off message.
+   *
+   * Used when the mode's own description stops being the useful thing to say —
+   * a scanned document in whole-document mode, where the mode hint still
+   * promises "发送全篇的可提取文字" and there is none to send. Switching mode
+   * restores the normal hint, so this is never sticky.
+   */
+  setHint(text: string): void {
+    this.hintEl.textContent = text;
   }
 
   /**

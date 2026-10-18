@@ -207,6 +207,60 @@ and the right behaviour.
 
 ---
 
+### A-28 — 0.6.5: whole-document image mode, for documents with no text at all
+
+A scanned paper has no text in the file. The user reported "未能提取到文本" on
+exactly such a document and read it as the text-extraction bug still being
+broken; it was not. Verified directly on their PDF: 7 pages, one image draw
+operation each, zero text operations, no encryption — the text genuinely is not
+there, and reading it differently cannot help. Looking at the page can.
+
+**`whole-document-images`** rasterises each page and sends them as images.
+
+**Rendering is independent of the viewer.** `renderPageImage` renders from the
+document, not from a painted canvas — `pageCanvas()` reads what the viewer has
+already drawn, which is the same render-state dependency that caused A-26, and
+whole-document mode would silently skip every page the user had not scrolled to.
+
+**JPEG, not PNG.** A scanned page is a photograph: PNG is lossless and several
+times larger for detail nobody asked to preserve. The region-screenshot ladder
+prefers PNG because line art and formulas ring under JPEG's 8×8 blocks; that
+reasoning does not apply to a page-sized scan, and the payload matters far more
+at this size.
+
+**Two budgets, both enforced as the pages are produced.** 12 pages
+(`MAX_WHOLE_DOCUMENT_IMAGE_PAGES`) and 12 MiB of data URL
+(`MAX_IMAGE_PAYLOAD_CHARS`). Checking as we go means a 30-page paper sends its
+first pages rather than rendering all 30 and being rejected as one oversized
+request — the alternative wastes every render the user waited for.
+
+**Coverage is stated, not implied.** When the cap bites, the model is told it
+received part of the paper and must say which pages. Without it, 12 pages of a
+30-page paper get summarised and called the article — the same silent-truncation
+failure the text mode guards against. This was caught by a test, not by review:
+the note is computed for the image mode but originally only reached the model
+through `composeContextTurn`, and image mode has no document *text* message, so
+it was dropped on the floor.
+
+**The images travel in the question turn**, never the document turn — the cache
+invariant from A-22/A-23. There is no document text in this mode, so the
+question turn is the only place they can go, and the "no document provided"
+branch must not fire when pages are being sent.
+
+**Scanned documents are intercepted locally.** Asking about a paper with no
+extractable text used to send the question with nothing attached, so the model
+could only answer "you have not given me the paper" — a paid round trip to be
+told what the app already knew. Now the send is stopped, the mode is switched to
+`whole-document-images` for the user, and the hint says why. Asking the question
+again is then one keystroke rather than a hunt through settings.
+
+**Cost is real and stated.** ~1k tokens per page versus a few hundred for its
+text. The mode hint says so before the user picks it.
+
+12 tests, negative-controlled: dropping the coverage note fails exactly the
+assertion that checks it. The rendering itself is not unit-tested — it needs a
+real canvas — and that is stated rather than implied.
+
 ### A-27 — 0.6.4: Ctrl+wheel zoom, anchored on the cursor
 
 Hold Ctrl and roll the wheel over the page to zoom. The arithmetic
@@ -772,3 +826,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-25 | The composer treated an input method's Enter (committing a candidate) as a send, making it unusable in Chinese |
 | A-26 | Page text was read from the rendered DOM text layer, so extraction depended on scroll position and failed on freshly opened documents |
 | A-27 | Ctrl+wheel zoom, anchored on the cursor. Left/right Ctrl is not distinguishable on a WheelEvent, so any Ctrl zooms |
+| A-28 | Scanned documents have no text at all; whole-document image mode sends the pages as pictures, and text mode now refuses instead of sending an empty question |

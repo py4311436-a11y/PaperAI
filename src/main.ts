@@ -24,7 +24,11 @@ import { ChatPanel, humanError } from "./ai/chat-panel";
 import { ProviderSettings } from "./ai/provider-settings";
 import { SelectionBar } from "./ai/selection-bar";
 import { eraseDecision } from "./tools/erase-policy";
-import { buildContext, PRESET_PROMPTS } from "./ai/context-builder";
+import {
+  buildContext,
+  PAGE_IMAGE_MAX_EDGE,
+  PRESET_PROMPTS,
+} from "./ai/context-builder";
 import {
   buildMemoryDocument,
   chunkMessages,
@@ -531,6 +535,20 @@ async function sendWithMode(
     question,
     selection: isSnapshotCurrent(selection, currentDocumentId) ? selection : null,
     getPageText: async (p) => adapter.getPageText(p),
+    // Rasterised straight from the document, never from a painted canvas — see
+    // `renderPageImage`. This is the path that makes a scanned paper askable.
+    getPageImage: async (p) => {
+      const shot = await adapter.renderPageImage(p, PAGE_IMAGE_MAX_EDGE);
+      return {
+        id: `page-${p}-${Date.now().toString(36)}`,
+        url: shot.url,
+        chars: shot.chars,
+        width: shot.width,
+        height: shot.height,
+        source: "page",
+        page: p,
+      };
+    },
     currentPage: adapter.currentPage,
     pageCount: adapter.numPages,
     documentTitle: currentName || "未命名文档",
@@ -549,6 +567,32 @@ async function sendWithMode(
       toast("当前页没有可提取的文字（可能是扫描页）", "warn");
       return;
     }
+  }
+
+  // A document with no extractable text anywhere — a scanned paper, an
+  // image-only export. This is a real condition, not the old render-state bug:
+  // `getPageText` now reads the document itself, so an empty result means the
+  // text genuinely is not there.
+  //
+  // Sending anyway is the worst of the options. The request goes out with the
+  // question and nothing else, the model can only answer "you have not given me
+  // the paper", and the user pays for a round trip to be told the app already
+  // knew. There is also something to do about it — the image mode sends each
+  // page as a picture, which works exactly where text extraction does not — so
+  // offer that instead of failing quietly.
+  //
+  // The mode is switched for the user rather than merely named. They asked a
+  // question about a paper and got told the paper cannot be read; the next thing
+  // they want is to ask it again, not to go hunting for a setting.
+  if (mode === "whole-document" && built.stats.pages_sent.length === 0) {
+    toast("这篇文档没有可提取的文字（扫描件），已停止发送", "warn");
+    panel.setHint(
+      "全文无可提取文字——这是扫描件，文字管线对图片页无能为力。" +
+        "已为你切换到「整篇图片」模式，直接再问一次即可：每页会作为图像发送，视觉模型可以读图。" +
+        "（若只想问某块区域，也可继续用「截图提问」。）"
+    );
+    panel.selectMode("whole-document-images");
+    return;
   }
 
   // Reading memory goes in as prior context, folded into the document message

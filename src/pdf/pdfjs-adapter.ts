@@ -755,6 +755,53 @@ export class PdfjsAdapter {
   }
 
   /**
+   * Render a page to an image, straight from the document.
+   *
+   * Deliberately NOT `pageCanvas()`. That reads the canvas the viewer already
+   * painted, which makes the result depend on what has been rendered — the exact
+   * dependency that produced A-26 for text. A page the user has not scrolled to
+   * has no canvas, so whole-document image mode would silently skip pages.
+   *
+   * Rendering from the document instead means the answer does not change with
+   * scroll position, zoom, or how long the document has been open.
+   *
+   * JPEG, not PNG. A scanned page is a photograph: PNG is lossless and would be
+   * several times larger for detail nobody asked to preserve, and the payload is
+   * capped anyway. The region-screenshot ladder prefers PNG because line art and
+   * formulas ring under JPEG's 8×8 blocks; that reasoning does not apply to a
+   * page-sized scan, and the budget matters far more at this size.
+   */
+  async renderPageImage(
+    pageNumber: number,
+    maxEdge: number,
+    quality = 0.82
+  ): Promise<{ url: string; chars: number; width: number; height: number }> {
+    if (!this.doc) throw new Error("No document open");
+    const page = await this.doc.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    // Only ever shrink. Upscaling invents pixels and costs bytes for nothing.
+    const scale = Math.min(1, maxEdge / Math.max(base.width, base.height));
+    const viewport = page.getViewport({ scale });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.floor(viewport.width));
+    canvas.height = Math.max(1, Math.floor(viewport.height));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("无法创建画布上下文");
+    // White matte first: a page's transparent margins would otherwise become
+    // black in a format with no alpha.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // `canvas` as well as `canvasContext`: the type requires both, and passing
+    // only the context is a compile error rather than a runtime one.
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+
+    const url = canvas.toDataURL("image/jpeg", quality);
+    return { url, chars: url.length, width: canvas.width, height: canvas.height };
+  }
+
+  /**
    * True when this page carries no extractable text (scanned / empty page).
    *
    * Async for the same reason `getPageText` is: it reads the document.
