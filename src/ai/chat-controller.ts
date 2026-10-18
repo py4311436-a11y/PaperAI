@@ -87,6 +87,15 @@ interface Session {
    */
   conversationId: string;
   turns: ChatTurn[];
+  /**
+   * Resolves the round `send()` is waiting on.
+   *
+   * Needed because a round can end *without* an event: cancelling locally marks
+   * the turn terminal, after which `accept()` rejects the provider's own
+   * `cancelled` as stale — so waiting only on events would hang `send()` forever
+   * and everything after it (saving, attaching refetched images) would never run.
+   */
+  settleCurrentRound?: () => void;
   /** The request that is allowed to append to this session. */
   activeRequestId: string | null;
   contextMode: ContextMode;
@@ -181,6 +190,9 @@ export class ChatController {
         turn.phase = "cancelled";
       }
       old.activeRequestId = null;
+      // Switching documents ends the round for the outgoing one; `send()` on it
+      // must stop waiting even though its events are now discarded as stale.
+      old.settleCurrentRound?.();
       void this.deps.cancelChat(reqId).catch(() => false);
     }
     this.generation++;
@@ -366,6 +378,22 @@ export class ChatController {
       for (;;) {
         pending = null;
         const turnRef = assistantTurn;
+        // `startChat` resolves when the request is *accepted*, not when it is
+        // finished: Rust spawns a task and returns, and the answer arrives later
+        // on a channel. Awaiting it alone therefore reads `pending` before any
+        // event has been delivered — the loop broke on `pending=none` and the
+        // tool call arrived a millisecond later to nobody listening. Measured in
+        // the log, in that order.
+        //
+        // So wait for a terminal event instead. Every path out of the Rust loop
+        // emits one (the network deadlines guarantee it), and a document switch
+        // cancels into `cancelled`.
+        let settleRound: (() => void) | null = null;
+        const roundOver = new Promise<void>((resolve) => {
+          settleRound = resolve;
+          // Registered on the session so a local cancellation can settle it too.
+          s.settleCurrentRound = resolve;
+        });
         await this.deps.startChat(
         requestId,
         profileId,
@@ -385,16 +413,19 @@ export class ChatController {
             case "completed":
               turn.phase = "completed";
               target.activeRequestId = null;
+              settleRound?.();
               break;
             case "cancelled":
               turn.phase = "cancelled";
               target.activeRequestId = null;
+              settleRound?.();
               break;
             case "error":
               turn.phase = "error";
               turn.errorCode = ev.code;
               turn.errorMessage = ev.safe_message;
               target.activeRequestId = null;
+              settleRound?.();
               break;
             case "tool_calls":
               // Not an answer. The phase stays `preparing` so the composer keeps
@@ -402,6 +433,7 @@ export class ChatController {
               // fetch what the model asked for and ask again.
               pending = ev.calls;
               this.deps.log?.(`controller: tool_calls accepted n=${ev.calls.length}`);
+              settleRound?.();
               break;
           }
           this.deps.onChange();
@@ -411,6 +443,10 @@ export class ChatController {
         s.conversationId,
         opts.tools ?? null
         );
+        // Now wait for the stream itself. Without this the check below runs
+        // against a `pending` that no event has had a chance to set.
+        await roundOver;
+        s.settleCurrentRound = undefined;
 
         // Read through an alias: the assignment happens inside the stream
         // callback, which control-flow analysis cannot see, so `pending` would
@@ -501,6 +537,9 @@ export class ChatController {
       s.activeRequestId = null;
       this.deps.onChange();
     }
+    // Settle whether or not the turn was still running: if the backend already
+    // finished, `send()` must not keep waiting for an event that will never come.
+    s.settleCurrentRound?.();
   }
 
   /** Clear the transcript for the current document (keep the context mode). */

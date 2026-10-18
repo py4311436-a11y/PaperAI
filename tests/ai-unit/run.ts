@@ -1242,7 +1242,16 @@ function makeControllerWithProfile(profileId: string | null) {
     now: () => 1000 + n,
     onChange: () => undefined,
     cancelChat: async () => true,
-    startChat: async () => undefined,
+    // Events arrive after this returns, as the real bridge does. `send` waits for
+    // a terminal event now, so a mock that never emits would hang every test that
+    // uses it.
+    startChat: async (_rid, _pid, _msgs, onEvent) => {
+      setTimeout(() => {
+        onEvent({ type: "started" });
+        onEvent({ type: "delta", text: "答" });
+        onEvent({ type: "completed", finish_reason: "stop" });
+      }, 0);
+    },
     currentProfileId: () => profileId,
   });
   return c;
@@ -1268,7 +1277,13 @@ test("the first send works with no model switching", async () => {
   c.openDocument("doc-1");
   const id = await c.send({ question: "这是什么", messages: [], ...built });
   assert.ok(id, "the first send must not be refused");
-  assert.equal(c.isBusy(), true, "and it is genuinely in flight");
+  // `send` resolves when the round is over, not when it starts — it waits for a
+  // terminal event because `startChat` only means "accepted". So the evidence
+  // that it really went out is the answered turn, not a busy flag.
+  const last = c.turns().at(-1)!;
+  assert.equal(last.role, "assistant");
+  assert.equal(last.phase, "completed");
+  assert.ok(last.content.length > 0, "and something came back");
 });
 
 test("a session with no provider refuses, and says so", async () => {
@@ -1308,13 +1323,23 @@ function makeToolController(script: Array<{ calls: any[] }>) {
       seen.push(messages);
       const step = script[round] ?? { calls: [] };
       round++;
-      onEvent({ type: "started" });
-      if (step.calls.length) {
-        onEvent({ type: "tool_calls", calls: step.calls });
-      } else {
-        onEvent({ type: "delta", text: "最终答案" });
-        onEvent({ type: "completed", finish_reason: "stop" });
-      }
+      // Deliver the events *after* returning, the way the real bridge does.
+      //
+      // `aiStartChat` awaits `invoke`, which resolves as soon as Rust has spawned
+      // the task; the answer then arrives on a channel. A mock that fires events
+      // synchronously made the loop look correct while it was reading `pending`
+      // before any event could have set it — the production stall, invisible in
+      // tests. This is the same shape as giving the code under test a fake of
+      // itself: the fake becomes the thing being tested.
+      setTimeout(() => {
+        onEvent({ type: "started" });
+        if (step.calls.length) {
+          onEvent({ type: "tool_calls", calls: step.calls });
+        } else {
+          onEvent({ type: "delta", text: "最终答案" });
+          onEvent({ type: "completed", finish_reason: "stop" });
+        }
+      }, 0);
     },
   });
   c.openDocument("doc-1");

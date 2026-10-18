@@ -1,5 +1,5 @@
 AI panel provider/model pickers — real Chromium
-Generated: 2026-10-18T15:15:18.125Z
+Generated: 2026-10-18T18:09:25.278Z
 
 [PASS] Q1 头部有 Provider 与模型两个下拉框
     provider={"tag":"SELECT","w":113,"h":23,"disabled":false}  model={"tag":"SELECT","w":104,"h":23,"disabled":false}

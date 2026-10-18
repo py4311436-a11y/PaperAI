@@ -207,6 +207,43 @@ and the right behaviour.
 
 ---
 
+### A-39 — 0.7.5: `send()` waited for the wrong event, so the tool calls arrived to nobody
+
+The log settled it, in this order:
+
+```
+ui: controller: loop ends — pending=none handler=yes
+ai: stream end model=deepseek-flash tool_calls n=2 elapsed_ms=1393
+ui: controller: tool_calls accepted n=2
+```
+
+The loop gave up **before** the tool calls arrived. `startChat` resolves when the
+request is *accepted* — Rust spawns a task and returns, and the answer arrives
+later on a channel — but the loop treated its resolution as "the answer is
+complete", read `pending` (still null), and broke. A millisecond later the calls
+landed with nobody left listening. The turn stayed at 生成中… forever.
+
+`send()` now waits for a **terminal event** instead: `completed`, `cancelled`,
+`error` or `tool_calls`. Every path out of the Rust loop emits one — the network
+deadlines guarantee it — so the wait is bounded.
+
+That change has a second edge, found by a test: cancelling locally marks the turn
+terminal, after which `accept()` rejects the provider's own `cancelled` as stale —
+so waiting only on events would hang forever. The resolver is now registered on
+the session and called from `cancelActive` and `openDocument` too.
+
+**Why the tests could not catch this.** The mock's `startChat` fired its events
+synchronously, before returning. Against that mock the loop looked correct,
+because `pending` was already set when the check ran. The real bridge delivers
+events afterwards. The fake had become the thing under test — the same shape as
+A-26 (every test carried its own fake `getPageText`) and the DOM-shim gaps. The
+mock now delivers events in a `setTimeout`, and removing `await roundOver` fails
+six tests.
+
+This also fixes something latent: `main` inspects `last.phase === "error"` right
+after `await chat.send(...)` to learn that a model refuses images. Under the old
+contract that check ran before the stream finished, so it could never have fired.
+
 ### A-38 — 0.7.3: an answer that stops mid-sentence is now bounded, and logged
 
 **The stall.** The model said one sentence — "我需要查看图 9 所在的页面。" — and the
@@ -1117,3 +1154,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | B | 0.7.0: the model can call `read_page` to fetch one page image mid-answer, capped at 2 pages per question; tool calling rather than a text marker, because a document could forge a marker |
 | A-37 | 0.7.2: a notes request was refused as a blank scan, because the guard keyed on `pages_sent` (empty for notes) instead of document content |
 | A-38 | 0.7.3: an answer that stopped mid-sentence was unbounded — the ceiling only applied before the first content; and stream endings were not logged |
+| A-39 | 0.7.5: `send()` waited on `startChat` resolving (request accepted) instead of a terminal event, so `tool_calls` arrived after the loop had already given up |
