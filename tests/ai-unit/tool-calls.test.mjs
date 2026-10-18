@@ -188,3 +188,42 @@ test("every call gets exactly one outcome", () => {
     assert.ok(answered.has(id), `${id} went unanswered`);
   }
 });
+
+/* --------------------- pages already sent are free but still duplicates -- */
+
+test("a page the context mode already sent is refused as a duplicate", () => {
+  // In whole-document image mode every page is in the request. Sending one
+  // again costs a full image for nothing.
+  const plan = planToolCalls([readPage("c1", 3)], 7, none, new Set([1, 2, 3, 4, 5, 6, 7]));
+  assert.deepEqual(plan.fetch, []);
+  assert.ok(plan.replies[0].reason.includes("已经发送过"), plan.replies[0].reason);
+});
+
+test("a page already sent does not consume the refetch budget", () => {
+  // The two questions are separate. Seeding the budget with sent pages would
+  // make a seven-image question start out over budget, so every call would
+  // prompt the user even though nothing new would be sent.
+  const plan = planToolCalls([readPage("c1", 3)], 30, none, new Set([1, 2, 3]));
+  assert.equal(plan.overBudget, false, "asking about an already-sent page spends nothing");
+});
+
+test("a page not in the request still spends budget when one was sent", () => {
+  // The complement: an image request that was truncated still benefits from a
+  // refetch of a page it never carried.
+  const plan = planToolCalls([readPage("c1", 20)], 30, none, new Set([1, 2, 3]));
+  assert.deepEqual(plan.fetch, [20], "a page outside the request must be fetched");
+  assert.equal(plan.overBudget, false, "one page is inside the budget");
+});
+
+test("budget and duplicates are counted separately", () => {
+  // Two refetches already spent, and the model asks for one already sent plus
+  // one new one: the duplicate is free, the new one exceeds the budget.
+  const plan = planToolCalls(
+    [readPage("a", 1), readPage("b", 9)],
+    30,
+    new Set([4, 5]),
+    new Set([1])
+  );
+  assert.deepEqual(plan.fetch, [9], "only the page not already carried is planned");
+  assert.equal(plan.overBudget, true, "and it is one too many");
+});

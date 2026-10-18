@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PaperAI",
   "mainBinaryName": "PaperAI",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "identifier": "com.paperai.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

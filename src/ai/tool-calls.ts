@@ -67,7 +67,18 @@ function readPageArg(args: string): { page: number } | { error: string } {
 export function planToolCalls(
   calls: ToolCall[],
   pageCount: number,
-  alreadyFetched: ReadonlySet<number>
+  /**
+   * Pages already refetched for this question. These count against the budget.
+   */
+  alreadyFetched: ReadonlySet<number>,
+  /**
+   * Pages already in the request for another reason — the context mode sent
+   * them. Repeated on purpose as a separate set: such a page costs nothing to
+   * re-request, so it must be refused as a duplicate but must *not* consume the
+   * refetch budget, or a whole-document image question would start out already
+   * over budget and every call would prompt the user.
+   */
+  alreadyInRequest: ReadonlySet<number> = new Set()
 ): ToolPlan {
   const fetch: number[] = [];
   const replies: { id: string; reason: string }[] = [];
@@ -90,9 +101,9 @@ export function planToolCalls(
       });
       continue;
     }
-    if (alreadyFetched.has(arg.page)) {
-      // Already in the request from an earlier round. Saying so is better than
-      // sending the same image twice: the model stops asking and uses it.
+    if (alreadyFetched.has(arg.page) || alreadyInRequest.has(arg.page)) {
+      // Already in the request. Saying so is better than sending the same image
+      // twice: the model stops asking and uses what it has.
       replies.push({ id: call.id, reason: `第 ${arg.page} 页的图像本次已经发送过了。` });
       continue;
     }

@@ -467,12 +467,13 @@ function readPageTool(pageCount: number): ToolDef {
 async function fulfilToolCalls(
   calls: ToolCall[],
   pageCount: number,
-  alreadyFetched: Set<number>
+  alreadyFetched: Set<number>,
+  alreadyInRequest: ReadonlySet<number>
 ): Promise<ToolOutcome> {
   // Every rule about *what may be fetched* lives in `planToolCalls`, which is
   // pure and tested. This function only does the parts that need the app: a
   // confirmation, a render, a progress line.
-  const plan = planToolCalls(calls, pageCount, alreadyFetched);
+  const plan = planToolCalls(calls, pageCount, alreadyFetched, alreadyInRequest);
   const replies: ChatMessage[] = plan.replies.map((r) => refusalReply(r.id, r.reason));
 
   if (!plan.fetch.length) {
@@ -547,6 +548,14 @@ const pendingRefetchAttachments: ImageAttachment[] = [];
  * a model that asks for page 5 twice must not get two free pages.
  */
 const refetchedPages = new Set<number>();
+/**
+ * Pages this question's context already carries.
+ *
+ * Filled from the built context right before sending. Separate from
+ * `refetchedPages` because the two answer different questions: this one is
+ * "would fetching it again be waste?", the other is "may I spend more?".
+ */
+const sentPagesThisTurn = new Set<number>();
 
 /**
  * Whether the last question was about the whole document.
@@ -841,6 +850,7 @@ async function sendWithMode(
   // per-session and the second question would be refused forever.
   refetchedPages.clear();
   pendingRefetchAttachments.length = 0;
+  sentPagesThisTurn.clear();
   if (!activeProfileId) {
     panel.show();
     toast("请先在设置中配置 AI Provider", "warn");
@@ -899,6 +909,10 @@ async function sendWithMode(
     // prefix diverge on every question and cost the cache the whole time.
     attachments,
   });
+
+  // What this request already carries. A read_page for one of these pages is a
+  // duplicate the model does not need to pay for.
+  for (const page of built.stats.pages_sent) sentPagesThisTurn.add(page);
 
   if (mode === "current-page" || mode === "nearby-pages") {
     if (built.stats.chars <= question.length) {
@@ -959,10 +973,15 @@ async function sendWithMode(
     // that can only be refused.
     tools: adapter.numPages ? [readPageTool(adapter.numPages)] : undefined,
     onToolCalls: async (calls) => {
+      // Pages the context mode already sent are in the request, so asking for
+      // one again is a duplicate — but it must not consume the refetch budget.
+      // Seeding `refetchedPages` with them would do exactly that: a seven-page
+      // image question would start out over budget and every call would prompt.
       const outcome = await fulfilToolCalls(
         calls,
         adapter.numPages,
-        refetchedPages
+        refetchedPages,
+        sentPagesThisTurn
       );
       return outcome;
     },

@@ -1,6 +1,6 @@
 # Rust provider integration suite (against local Mock SSE)
 
-Generated: 2026-10-18T14:14:14.164Z
+Generated: 2026-10-18T15:07:34.012Z
 Runner: scripts/run-ai-rust-tests.mjs
 
 | Test | Mock scenario | Result | Requests seen by mock |
