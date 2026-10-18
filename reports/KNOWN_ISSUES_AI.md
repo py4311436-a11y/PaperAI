@@ -207,6 +207,36 @@ and the right behaviour.
 
 ---
 
+### A-36 — 0.6.11: a session created after the provider was chosen could not send
+
+The failure, reproduced exactly: fresh install, first question in `selection`
+mode is refused for having no selection; switch to `whole-document`, ask again,
+and get **"未发送：上一个回答仍在进行中"**. Switching the model away and back
+makes it work.
+
+Two defects stacked, both about the order things happen in.
+
+**`profileId` started null.** `setProfileId` is a no-op while no session exists,
+and the session is created when a *document* opens — which is after the provider
+is chosen. So the session never received it and `send()` refused. Touching the
+model picker called `setProfileId` again, which is exactly why that "fixed" it.
+The session now inherits the active provider at creation (`currentProfileId`),
+and `openChatSession()` re-binds it at all four document-opening call sites.
+
+**`contextMode` was hardcoded to `selection` in the session constructor.** A
+previous release changed the *fallback* in `contextMode()` and left this literal
+alone, so the change never took effect. A fresh document has nothing selected, so
+the default itself was deciding the first question would fail.
+
+**The error message was guessing.** It inferred "busy" whenever any turn existed,
+so a session with no provider reported "上一个回答仍在进行中" — a confident, wrong
+diagnosis that sent the user looking for a stop button that did nothing. It now
+names the actual condition, in order.
+
+Four tests, each negative-controlled: removing the inherited profile fails the
+inheritance test and the first-send test; restoring the `selection` literal fails
+the default test.
+
 ### A-35 — 0.6.10: the send button was dead from the first second; tables render
 
 **The real cause of "Enter does nothing with DeepSeek".** A-33 addressed a
@@ -995,3 +1025,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-33 | Enter while streaming was swallowed with no message (looked model-dependent); a keepalive-only stream never hit the idle timeout |
 | A-34 | Markdown tables were never rendered; pipes arrived as literal text |
 | A-35 | A restored turn saved mid-stream made the app permanently busy, so sending was dead from startup. Snapshots were taken after the guard |
+| A-36 | A session created after the provider was chosen had no provider bound, so the first send was refused; `selection` was hardcoded as the default mode |

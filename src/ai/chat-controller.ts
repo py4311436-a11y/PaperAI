@@ -34,6 +34,16 @@ export interface ChatControllerDeps {
     sessionId?: string
   ) => Promise<void>;
   cancelChat: (requestId: string) => Promise<boolean>;
+  /**
+   * The provider currently selected, or null.
+   *
+   * Needed because sessions are created when a *document* opens, which can be
+   * long after the profile was chosen — and `setProfileId` is a no-op while no
+   * session exists. Without this, a session created after the choice starts with
+   * `profileId: null` and every send is refused until the user touches the model
+   * picker, which looks like a broken composer.
+   */
+  currentProfileId?: () => string | null;
   onChange: () => void;
   newId: () => string;
   now?: () => number;
@@ -135,8 +145,13 @@ export class ChatController {
         conversationId: this.deps.newId(),
         turns: [],
         activeRequestId: null,
-        contextMode: "selection",
-        profileId: null,
+        // Whole document, not selection: a fresh document has nothing selected,
+        // so a `selection` default refuses the very first question. The default
+        // was deciding that the send would fail.
+        contextMode: "whole-document",
+        // Inherit whatever provider is already selected — see the note on
+        // `currentProfileId`. A session must never start without one.
+        profileId: this.deps.currentProfileId?.() ?? null,
       });
     }
     this.deps.onChange();

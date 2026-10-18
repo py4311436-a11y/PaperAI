@@ -194,6 +194,9 @@ const chat = new ChatController({
   startChat: (id, profileId, messages, onEvent, temperature, sessionId) =>
     bridge.aiStartChat(id, profileId, messages, onEvent, temperature, sessionId),
   cancelChat: (id) => bridge.aiCancelChat(id),
+  // Read lazily: the choice is made before any document is open, and a session
+  // created later must inherit it.
+  currentProfileId: () => activeProfileId,
   onChange: () => {
     renderChat();
     scheduleChatSave();
@@ -597,6 +600,21 @@ async function refreshProfileState(): Promise<void> {
   }
 }
 
+/**
+ * Open the per-document conversation and bind it to the active provider.
+ *
+ * Two reasons this is one call and not two at each site. A session created while
+ * a provider is already selected inherits it (`currentProfileId`), but one
+ * created *before* the provider was configured starts unbound — and nothing else
+ * re-binds it, so the first send is refused for a reason the user cannot see.
+ * And there are four places a document gets opened; missing the extra line at
+ * any of them recreates exactly that bug.
+ */
+function openChatSession(documentId: string): void {
+  chat.openDocument(documentId);
+  if (activeProfileId) chat.setProfileId(activeProfileId);
+}
+
 function renderChat(): void {
   const turns = chat.turns();
   const activeAt = turns.findIndex((t) => t.phase === "preparing" || t.phase === "streaming");
@@ -791,13 +809,18 @@ async function sendWithMode(
     imageTokens: activeProfile()?.image_tokens,
   });
   renderChat();
-  // A null turn id means the controller refused: no session, no provider, or a
-  // request already in flight. Previously that was the end of it — nothing sent,
-  // nothing said — and the only way to interpret it was "the app is broken".
+  // A null turn id means the controller refused. Say *which* thing is wrong:
+  // the earlier version inferred "busy" whenever any turn existed, so a session
+  // with no provider set reported "上一个回答仍在进行中" — a confident, wrong
+  // diagnosis that sent the user looking for a stop button that did nothing.
   if (!turnId) {
-    const why = !chat.turns().length
-      ? "会话尚未就绪，请重新打开文档后再试"
-      : "上一个回答仍在进行中，请稍候或点「停止」";
+    const why = !activeProfileId
+      ? "尚未选择 AI Provider，请在设置中配置"
+      : chat.isBusy()
+        ? "上一个回答仍在进行中，请稍候或点「停止」"
+        : !chat.profileId()
+          ? "当前会话未绑定 Provider，请重新选择模型"
+          : "会话尚未就绪，请重新打开文档后再试";
     diagnostics.log("warn", `send refused: ${why}`);
     toast(`未发送：${why}`, "warn");
   }
@@ -937,7 +960,7 @@ async function openPath(rawPath: string): Promise<boolean> {
     // A path-stable identity is enough to keep transcripts apart, and it is
     // never sent to a provider (only the display name is).
     currentDocumentId = info.path;
-    chat.openDocument(currentDocumentId);
+    openChatSession(currentDocumentId);
     selection = null;
     selectionBar.hide();
     statusFile.textContent = `${info.name} — ${adapter.numPages} 页`;
@@ -1517,7 +1540,7 @@ function installBrowserFileFallback() {
     currentName = f.name;
     currentPath = f.name;
     currentDocumentId = `browser:${f.name}`;
-    chat.openDocument(currentDocumentId);
+    openChatSession(currentDocumentId);
     statusFile.textContent = `${f.name} — ${adapter.numPages} 页`;
     adapter.markClean();
   });
@@ -1585,7 +1608,7 @@ if (IS_AUTOMATION) {
         currentName = name;
         currentPath = null;
         currentDocumentId = `buffer:${name}`;
-        chat.openDocument(currentDocumentId);
+        openChatSession(currentDocumentId);
         statusFile.textContent = `${name} — ${adapter.numPages} 页`;
         adapter.markClean();
       },
@@ -1593,7 +1616,7 @@ if (IS_AUTOMATION) {
         await adapter.open(url, name);
         currentName = name;
         currentDocumentId = `url:${name}`;
-        chat.openDocument(currentDocumentId);
+        openChatSession(currentDocumentId);
         statusFile.textContent = `${name} — ${adapter.numPages} 页`;
         adapter.markClean();
       },

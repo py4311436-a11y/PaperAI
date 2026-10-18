@@ -1214,3 +1214,68 @@ test("an image count of zero adds nothing to the line", async () => {
   });
   assert.ok(!c.turns()[0].contextLabel.includes("张图片"), c.turns()[0].contextLabel);
 });
+
+/* --------------------------- a session must be usable the moment it exists -- */
+
+/**
+ * The reported failure: a fresh install, first question in selection mode was
+ * refused for having no selection, switching to whole-document and asking again
+ * got "上一个回答仍在进行中" — and switching model away and back fixed it.
+ *
+ * Two defects behind it, both about a session being created after the provider
+ * was chosen:
+ *
+ *  1. `profileId` started null. `setProfileId` is a no-op while no session
+ *     exists, and the document (which creates one) opens later — so the session
+ *     never got the provider. `send()` refuses without it, and touching the model
+ *     picker re-sent the value, which is why that worked.
+ *  2. `contextMode` was hardcoded to `selection`, so a document with nothing
+ *     selected refused the first question outright.
+ *
+ * Neither is visible in the UI, and together they make a healthy app look dead.
+ */
+function makeControllerWithProfile(profileId: string | null) {
+  let n = 0;
+  const c = new ChatController({
+    newId: () => `id-${++n}`,
+    now: () => 1000 + n,
+    onChange: () => undefined,
+    cancelChat: async () => true,
+    startChat: async () => undefined,
+    currentProfileId: () => profileId,
+  });
+  return c;
+}
+
+test("a session created after the provider was chosen inherits it", () => {
+  const c = makeControllerWithProfile("deepseek");
+  c.openDocument("doc-1");
+  assert.equal(c.profileId(), "deepseek", "the session must know its provider");
+});
+
+test("a freshly opened document defaults to whole-document, not selection", () => {
+  // `selection` on a fresh document means the first question is refused for
+  // having nothing selected — the default deciding the send would fail.
+  const c = makeControllerWithProfile("deepseek");
+  c.openDocument("doc-1");
+  assert.equal(c.contextMode(), "whole-document");
+});
+
+test("the first send works with no model switching", async () => {
+  // The end-to-end property the user reported: open, ask, and it goes.
+  const c = makeControllerWithProfile("deepseek");
+  c.openDocument("doc-1");
+  const id = await c.send({ question: "这是什么", messages: [], ...built });
+  assert.ok(id, "the first send must not be refused");
+  assert.equal(c.isBusy(), true, "and it is genuinely in flight");
+});
+
+test("a session with no provider refuses, and says so", async () => {
+  // The refusal is legitimate here; the defect was that it was indistinguishable
+  // from a busy session.
+  const c = makeControllerWithProfile(null);
+  c.openDocument("doc-1");
+  const id = await c.send({ question: "这是什么", messages: [], ...built });
+  assert.equal(id, null, "must not pretend to send");
+  assert.equal(c.isBusy(), false, "and must not claim to be busy");
+});
