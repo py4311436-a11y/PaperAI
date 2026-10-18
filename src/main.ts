@@ -205,6 +205,7 @@ const chat = new ChatController({
   // Read lazily: the choice is made before any document is open, and a session
   // created later must inherit it.
   currentProfileId: () => activeProfileId,
+  log: (message) => bridge.uiLog(message),
   onChange: () => {
     renderChat();
     scheduleChatSave();
@@ -464,6 +465,27 @@ function readPageTool(pageCount: number): ToolDef {
  * can then answer from what it has, which is better than the user getting
  * nothing because the model asked for something impossible.
  */
+/**
+ * Reject instead of waiting forever.
+ *
+ * A promise with no timeout is unbounded, and an unbounded settle inside the tool
+ * loop leaves the turn at "生成中…" with no request in flight and nothing in the
+ * log — which is exactly what a refetch stall looked like. The renderer is the
+ * step that touches the document, so it is the one that can wait on something
+ * outside this file.
+ */
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label}超时（${Math.round(ms / 1000)} 秒）`)), ms)
+    ),
+  ]);
+}
+
+/** How long one page render may take before the refetch is abandoned. */
+const REFETCH_RENDER_TIMEOUT_MS = 20_000;
+
 async function fulfilToolCalls(
   calls: ToolCall[],
   pageCount: number,
@@ -474,6 +496,11 @@ async function fulfilToolCalls(
   // pure and tested. This function only does the parts that need the app: a
   // confirmation, a render, a progress line.
   const plan = planToolCalls(calls, pageCount, alreadyFetched, alreadyInRequest);
+  bridge.uiLog(
+    `tool calls: n=${calls.length} fetch=[${plan.fetch.join(",")}] ` +
+      `refused=${plan.replies.length} overBudget=${plan.overBudget} ` +
+      `already=${alreadyFetched.size} inRequest=${alreadyInRequest.size}`
+  );
   const replies: ChatMessage[] = plan.replies.map((r) => refusalReply(r.id, r.reason));
 
   if (!plan.fetch.length) {
@@ -503,7 +530,28 @@ async function fulfilToolCalls(
   for (const page of approved) {
     alreadyFetched.add(page);
     panel.setPhase("preparing", 0, chat.turns().length, approved.length);
-    const shot = await adapter.renderPageImage(page, PAGE_IMAGE_MAX_EDGE);
+    bridge.uiLog(`refetch: rendering page ${page}`);
+    let shot: Awaited<ReturnType<typeof adapter.renderPageImage>>;
+    try {
+      shot = await withTimeout(
+        adapter.renderPageImage(page, PAGE_IMAGE_MAX_EDGE),
+        REFETCH_RENDER_TIMEOUT_MS,
+        `渲染第 ${page} 页`
+      );
+    } catch (e) {
+      // A page that cannot be rendered must not take the answer with it: reply
+      // with the failure so the model can say what it could not read.
+      const why = e instanceof Error ? e.message : String(e);
+      bridge.uiLog(`refetch: page ${page} failed: ${why}`);
+      replies.push(
+        refusalReply(
+          calls.find((c) => c.function?.name === "read_page")?.id ?? `call_${page}`,
+          `第 ${page} 页的图像无法取回（${why}）。请用已有内容回答，并说明缺什么。`
+        )
+      );
+      continue;
+    }
+    bridge.uiLog(`refetch: page ${page} ok chars=${shot.chars}`);
     pendingRefetchAttachments.push({
       id: `refetch-${page}-${Date.now().toString(36)}`,
       url: shot.url,

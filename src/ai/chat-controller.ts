@@ -62,6 +62,16 @@ export interface ChatControllerDeps {
    * picker, which looks like a broken composer.
    */
   currentProfileId?: () => string | null;
+  /**
+   * Diagnostic line, for the app log.
+   *
+   * Added because a tool-call loop stalled with the request finished on the Rust
+   * side (`tool_calls n=2`) and nothing afterwards: the frontend either never
+   * received the event, dropped it as stale, or hung while fulfilling it, and
+   * from outside those are indistinguishable. Logging the decision points costs
+   * one line each and makes the next occurrence answerable.
+   */
+  log?: (message: string) => void;
   onChange: () => void;
   newId: () => string;
   now?: () => number;
@@ -321,11 +331,30 @@ export class ChatController {
     this.deps.onChange();
 
     const accept = (): Session | null => {
-      if (myGeneration !== this.generation) return null;
+      if (myGeneration !== this.generation) {
+        this.deps.log?.(`controller: event dropped — generation ${myGeneration} != ${this.generation}`);
+        return null;
+      }
       const target = this.sessions.get(ownerDocument);
-      if (!target || target.activeRequestId !== requestId) return null;
+      if (!target) {
+        this.deps.log?.("controller: event dropped — session gone");
+        return null;
+      }
+      if (target.activeRequestId !== requestId) {
+        this.deps.log?.(
+          `controller: event dropped — active request is ${target.activeRequestId}, not ${requestId}`
+        );
+        return null;
+      }
       const turn = target.turns.find((t) => t.id === requestId);
-      if (!turn || isTerminal(turn.phase)) return null;
+      if (!turn) {
+        this.deps.log?.("controller: event dropped — turn not found");
+        return null;
+      }
+      if (isTerminal(turn.phase)) {
+        this.deps.log?.(`controller: event dropped — turn is ${turn.phase}`);
+        return null;
+      }
       return target;
     };
 
@@ -372,6 +401,7 @@ export class ChatController {
               // showing that something is in flight — the loop below is about to
               // fetch what the model asked for and ask again.
               pending = ev.calls;
+              this.deps.log?.(`controller: tool_calls accepted n=${ev.calls.length}`);
               break;
           }
           this.deps.onChange();
@@ -382,7 +412,17 @@ export class ChatController {
         opts.tools ?? null
         );
 
-        if (!pending || !opts.onToolCalls) break;
+        // Read through an alias: the assignment happens inside the stream
+        // callback, which control-flow analysis cannot see, so `pending` would
+        // otherwise be narrowed to `never` here.
+        const got = pending as ToolCall[] | null;
+        if (!got || !opts.onToolCalls) {
+          this.deps.log?.(
+            `controller: loop ends — pending=${got ? got.length : "none"} ` +
+              `handler=${opts.onToolCalls ? "yes" : "no"}`
+          );
+          break;
+        }
         // Bounded on purpose. The model decides when to ask, so without a cap a
         // document that talks it into asking for page after page spends the
         // user's money with no end. The cap is ours, not the model's.
@@ -397,7 +437,9 @@ export class ChatController {
         }
         round++;
 
-        const outcome = await opts.onToolCalls(pending);
+        this.deps.log?.(`controller: fulfilling n=${got.length} round=${round}`);
+        const outcome = await opts.onToolCalls(got);
+        this.deps.log?.(`controller: fulfilled kind=${outcome.kind}`);
         if (outcome.kind === "stop") {
           turnRef.content += (turnRef.content ? "\n\n" : "") + outcome.reason;
           turnRef.phase = "completed";
@@ -414,7 +456,7 @@ export class ChatController {
           {
             role: "assistant",
             content: turnRef.content || "",
-            tool_calls: pending,
+            tool_calls: got,
           },
           ...outcome.messages,
         ];

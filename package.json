@@ -1,7 +1,7 @@
 {
   "name": "paperai-poc",
   "private": true,
-  "version": "0.7.3",
+  "version": "0.7.4",
   "type": "module",
   "description": "PaperAI — Read · Annotate · Ask. Windows desktop PDF reader (Tauri 2 + PDF.js)",
   "scripts": {

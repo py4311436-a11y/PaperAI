@@ -1,6 +1,6 @@
 # Frontend AI unit tests
 
-Generated: 2026-10-18T15:55:08.881Z
+Generated: 2026-10-18T17:51:31.089Z
 Runner: scripts/run-ai-unit-tests.mjs (compiles src/ai/*.ts with tsc, then node --test)
 Compiled from: src/ai/context-builder.ts, chat-controller.ts, markdown-renderer.ts, types.ts
 

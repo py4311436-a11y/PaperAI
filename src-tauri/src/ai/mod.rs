@@ -265,6 +265,20 @@ pub fn ai_chat_clear(pdf_path: String) -> Result<(), AppError> {
     chat_history::clear_chat(std::path::Path::new(&pdf_path))
 }
 
+/// Append a line from the frontend to the app log.
+///
+/// The UI had no way to reach `paperai.log`, so a stall *inside* the frontend was
+/// invisible: the Rust side recorded the stream ending (`tool_calls n=2`) and then
+/// nothing, with no way to tell whether the pages were rendered, the request was
+/// re-sent, or a promise simply never resolved. Deliberately free-form and never
+/// given document content by its callers.
+#[tauri::command]
+pub fn ui_log(message: String) {
+  // Truncated so a stray large string cannot bloat the log.
+  let trimmed: String = message.chars().take(500).collect();
+  crate::audit(&format!("ui: {trimmed}"));
+}
+
 /// Tool names the model is allowed to invoke.
 ///
 /// A closed list, checked here rather than trusted from the frontend. A tool is

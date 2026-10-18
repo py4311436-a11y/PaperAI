@@ -153,6 +153,7 @@ pub fn run() {
             ai::ai_chat_read,
             ai::ai_chat_write,
             ai::ai_chat_clear,
+            ai::ui_log,
             ai::ai_memory_append,
             ai::ai_start_chat,
             ai::ai_cancel_chat,

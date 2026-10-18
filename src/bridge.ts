@@ -337,6 +337,17 @@ export async function aiStartChat(
   });
 }
 
+/**
+ * Append a line from the UI to the app log.
+ *
+ * Fire and forget: logging must never be the reason something fails. Used around
+ * steps that can silently stall, so the next occurrence is diagnosable from the
+ * machine rather than from a screenshot.
+ */
+export function uiLog(message: string): void {
+  void invoke<void>("ui_log", { message }).catch(() => undefined);
+}
+
 /* ---------------------------------------------------- save recovery (K-07) -- */
 
 export interface RecoveryCandidate {
