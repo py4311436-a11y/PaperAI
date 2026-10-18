@@ -17,6 +17,15 @@ use super::config::{chat_completions_url, normalize_base_url};
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const FIRST_TOKEN_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Absolute ceiling for the first *content* to arrive, regardless of activity.
+///
+/// The idle timeout above is reset by any byte, which a chatty gateway satisfies
+/// forever while producing nothing. This one is reset by nothing. Larger than
+/// [`FIRST_TOKEN_TIMEOUT`] because a request carrying several page images has to
+/// upload them before the model can start, and that is legitimate work rather
+/// than a stall.
+pub const FIRST_CONTENT_CEILING: Duration = Duration::from_secs(180);
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Build the shared client. Cheap to clone (it is an `Arc` inside).

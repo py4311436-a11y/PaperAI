@@ -51,6 +51,14 @@ export interface ChatPanelDeps {
    * remembered page images. The two must move together — see `setIncludeHistory`.
    */
   onIncludeHistory: (include: boolean) => void;
+  /**
+   * A send was attempted while an answer is still streaming.
+   *
+   * Exists because Enter bypasses the disabled send button: without this the
+   * keystroke does nothing at all, which is indistinguishable from a broken
+   * composer. The user needs to be told what is actually happening.
+   */
+  onSendBlocked: () => void;
 }
 
 const MODE_LABELS: Record<ContextMode, string> = {
@@ -308,6 +316,14 @@ export class ChatPanel {
   }
 
   private submit(): void {
+    // The send button is disabled while an answer streams; Enter is not, because
+    // a disabled button cannot stop a keystroke. Without this check the key does
+    // nothing at all — and if the answer is slow, "nothing at all" reads as a
+    // broken app rather than as "wait".
+    if (this.busy) {
+      this.deps.onSendBlocked();
+      return;
+    }
     const q = this.input.value.trim();
     // An image with no words is a legitimate question — "what is in this
     // figure" — so attachments alone are enough to send.
@@ -608,7 +624,20 @@ export class ChatPanel {
   }
 
   /** Reflect the state machine in the composer. */
-  setPhase(phase: ChatPhase, recordCount: number, messageCount: number): void {
+  setPhase(
+    phase: ChatPhase,
+    recordCount: number,
+    messageCount: number,
+    /**
+     * Images carried by the in-flight question.
+     *
+     * Used only to make the wait legible. A whole-document image request uploads
+     * megabytes and can sit a minute or more before the first token, and a
+     * status line that just says "正在准备…" for that long is what makes a slow
+     * answer look like a hung one.
+     */
+    pendingImages = 0
+  ): void {
     const busy = phase === "preparing" || phase === "streaming" || phase === "cancelling";
     // Switching provider/model mid-stream would not affect the in-flight
     // request, so it would silently lie about what is answering. Freeze both.
@@ -622,10 +651,17 @@ export class ChatPanel {
     this.input.disabled = false; // typing is fine; send is what is gated
     switch (phase) {
       case "preparing":
-        this.statusEl.textContent = "正在准备…";
+        this.statusEl.textContent = pendingImages
+          ? `正在发送 ${pendingImages} 页图片并等待模型响应（整篇图片较慢，通常 1–2 分钟）…`
+          : "正在准备…";
         break;
       case "streaming":
-        this.statusEl.textContent = "生成中…";
+        // Before the first token arrives, "streaming" means the connection is
+        // open and nothing has come back yet — say that rather than implying
+        // text is already being written.
+        this.statusEl.textContent = pendingImages
+          ? `已连接，等待模型开始输出（本次含 ${pendingImages} 页图片）…`
+          : "生成中…";
         break;
       case "cancelling":
         this.statusEl.textContent = "正在停止…";

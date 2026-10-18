@@ -190,6 +190,32 @@ const scenarios = {
   }),
 
   /**
+   * A stream that stays busy forever without ever producing content.
+   *
+   * This is what a chatty gateway does with a large image upload: SSE comments
+   * and role-only chunks every few hundred milliseconds, so the socket never
+   * goes quiet — while the user watches an empty answer.
+   *
+   * The idle deadline is satisfied by every one of these bytes. Only an absolute
+   * ceiling on "first content" can end it, which is what this scenario exists to
+   * prove.
+   */
+  keepaliveOnly: (model) => ({
+    status: 200,
+    slow: true,
+    makeBuffers: () => {
+      const out = [];
+      for (let i = 0; i < 40; i++) {
+        // A comment line, then a delta carrying only the role. Neither is text.
+        out.push(Buffer.from(": keepalive\n\n"));
+        out.push(Buffer.from(sseChunk(model, { role: "assistant" })));
+      }
+      return out;
+    },
+    gapMs: 300,
+  }),
+
+  /**
    * A-16: output stops half-way and the connection is then held open forever.
    *
    * The provider is not slow here, it is gone: nothing more will ever arrive.

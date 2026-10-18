@@ -927,3 +927,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-30 | Notes could not be generated from a scanned paper; the pipeline now reads the pages as images |
 | A-31 | Conversations persist beside the PDF (JSON + content-addressed images), with timestamps |
 | A-32 | Notes can stand in for the document in whole-document mode; history can be switched off. `slice(-0)` sent all history instead of none |
+| A-33 | Enter while streaming was swallowed with no message (looked model-dependent); a keepalive-only stream never hit the idle timeout |

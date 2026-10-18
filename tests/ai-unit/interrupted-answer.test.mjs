@@ -179,3 +179,110 @@ test("finishing a generation does not leave the row claiming to be busy", () => 
   assert.equal(panel.isMemoryBusy(), false);
   assert.equal(memBtn(panel).disabled, false);
 });
+
+/* ------------------------------------- Enter while an answer is in flight -- */
+
+/**
+ * The reported symptom: Enter did nothing, and it looked model-dependent.
+ *
+ * It was not. The send button is disabled while an answer streams, but a
+ * disabled button cannot stop a keystroke — Enter went straight to `submit()`,
+ * which had no busy check, and `chat.send()` returned null for a busy session
+ * with no message anywhere. So the key was simply swallowed for as long as the
+ * request was in flight.
+ *
+ * That reads as model-dependent because a slow model is in flight for a minute
+ * or two while a fast one is finished before the user types again.
+ */
+function panelWithSpy() {
+  const calls = { send: 0, blocked: 0 };
+  const panel = new ChatPanel({
+    onSend: () => {
+      calls.send++;
+    },
+    onStop: () => {},
+    onNewConversation: () => {},
+    onContextModeChange: () => {},
+    onOpenSettings: () => {},
+    onOpenLink: () => {},
+    onCopy: () => {},
+    onSelectProfile: () => {},
+    onSelectModel: () => {},
+    onGenerateMemory: () => {},
+    onScreenshot: () => {},
+    onIncludeHistory: () => {},
+    onSendBlocked: () => {
+      calls.blocked++;
+    },
+  });
+  panel.show();
+  return { panel, calls };
+}
+
+function composerInput(panel) {
+  return panel.root.querySelector("#ai-input");
+}
+
+function pressEnter(input) {
+  input.fire("keydown", { key: "Enter", shiftKey: false, isComposing: false, keyCode: 13, preventDefault() {} });
+}
+
+test("Enter sends when the composer is idle", () => {
+  const { panel, calls } = panelWithSpy();
+  panel.setPhase("idle", 0, 0);
+  const input = composerInput(panel);
+  input.value = "这是什么";
+  pressEnter(input);
+  assert.equal(calls.send, 1, "the question must go out");
+  assert.equal(calls.blocked, 0);
+});
+
+test("Enter while streaming is reported instead of silently swallowed", () => {
+  // The fix. Without it the keystroke produces nothing at all, which is
+  // indistinguishable from a broken composer — and if the answer is slow, that
+  // is exactly when the user tries again.
+  const { panel, calls } = panelWithSpy();
+  panel.setPhase("streaming", 0, 2);
+  const input = composerInput(panel);
+  input.value = "再问一个";
+  pressEnter(input);
+  assert.equal(calls.send, 0, "must not start a second request");
+  assert.equal(calls.blocked, 1, "and must say why");
+});
+
+test("Enter while preparing is reported too", () => {
+  // "preparing" is the long one for image requests: the upload happens here.
+  const { panel, calls } = panelWithSpy();
+  panel.setPhase("preparing", 0, 2, 7);
+  pressEnter(composerInput(panel));
+  assert.equal(calls.blocked, 1);
+});
+
+test("the status line says how many images are being waited on", () => {
+  // A seven-page request can sit a minute before the first character. "正在准备…"
+  // for that long is what makes a slow answer look like a hung one.
+  const { panel } = panelWithSpy();
+  panel.setPhase("preparing", 0, 2, 7);
+  const status = panel.root.querySelector(".ai-status")?.textContent ?? "";
+  assert.ok(status.includes("7"), `expected the image count: ${status}`);
+});
+
+test("Shift+Enter is still a newline, never a send", () => {
+  const { panel, calls } = panelWithSpy();
+  panel.setPhase("idle", 0, 0);
+  const input = composerInput(panel);
+  input.value = "第一行";
+  input.fire("keydown", { key: "Enter", shiftKey: true, isComposing: false, keyCode: 13, preventDefault() {} });
+  assert.equal(calls.send, 0);
+  assert.equal(calls.blocked, 0, "a newline is not a blocked send");
+});
+
+test("an input method's Enter is not a send", () => {
+  // A-25: every Chinese input method uses Enter to commit a candidate first.
+  const { panel, calls } = panelWithSpy();
+  panel.setPhase("idle", 0, 0);
+  const input = composerInput(panel);
+  input.value = "zhe shi";
+  input.fire("keydown", { key: "Enter", shiftKey: false, isComposing: true, keyCode: 229, preventDefault() {} });
+  assert.equal(calls.send, 0, "must not send half-typed pinyin");
+});

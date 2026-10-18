@@ -380,6 +380,46 @@
     }
   },
   {
+    "test": "keepalives_without_content_hit_the_absolute_ceiling",
+    "scenario": "keepaliveOnly",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "概述这篇论文",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "a_slow_stream_with_content_is_not_killed_by_the_ceiling",
+    "scenario": "longHealthy",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "概述这篇论文",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
     "test": "a_collected_answer_contains_every_delta",
     "scenario": "slow",
     "method": "POST",

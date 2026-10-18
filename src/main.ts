@@ -181,6 +181,13 @@ const panel = new ChatPanel({
   onIncludeHistory: (include) => {
     includeHistory = include;
   },
+  onSendBlocked: () => {
+    // Name the reason. "回答还在生成中" is only half of it — the user's real
+    // question in that moment is "is it stuck?", and with a seven-image request
+    // it may genuinely take a minute or two before the first character appears.
+    toast("正在等待上一个回答，请稍候；想打断就点「停止」", "warn");
+    panel.show();
+  },
 });
 
 const chat = new ChatController({
@@ -541,9 +548,20 @@ async function refreshProfileState(): Promise<void> {
 
 function renderChat(): void {
   const turns = chat.turns();
-  const active = turns.find((t) => t.phase === "preparing" || t.phase === "streaming");
+  const activeAt = turns.findIndex((t) => t.phase === "preparing" || t.phase === "streaming");
+  const active = activeAt >= 0 ? turns[activeAt] : undefined;
   panel.render(turns, active?.id ?? null);
-  panel.setPhase(active?.phase ?? (turns.length ? lastPhase(turns) : "idle"), 0, turns.length);
+  // How many images the in-flight question carried. A seven-page request
+  // legitimately takes a minute or two before the first character arrives, and
+  // "正在准备…" for that long is indistinguishable from a hang — so the status
+  // line says what is actually being waited on.
+  const pending = activeAt > 0 ? (turns[activeAt - 1].attachments?.length ?? 0) : 0;
+  panel.setPhase(
+    active?.phase ?? (turns.length ? lastPhase(turns) : "idle"),
+    0,
+    turns.length,
+    pending
+  );
   panel.setContextMode(chat.contextMode());
 }
 

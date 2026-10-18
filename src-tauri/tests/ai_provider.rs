@@ -510,6 +510,9 @@ fn a_stream_that_stops_mid_answer_is_reported_as_interrupted() {
         rx,
         &sink,
         Duration::from_secs(2),
+        // Room for the content ceiling so this test is about the *idle* timeout,
+        // which is the one it names.
+        Duration::from_secs(30),
     ));
 
     match c.terminal() {
@@ -617,4 +620,84 @@ fn a_model_catalogue_request_carries_no_session_header() {
     // The Node runner reads the request log; this side only asserts the call
     // completed without panicking. The header check lives there because the
     // recorded headers are only available to the mock.
+}
+
+/// A stream that keeps the connection busy but never produces content must be
+/// cut off by the absolute ceiling.
+///
+/// This is the reported failure: a seven-image request sat for minutes with an
+/// empty answer. The idle deadline could not catch it because every SSE comment
+/// and role-only chunk resets the timer — the connection was never idle, it just
+/// never said anything.
+///
+/// The ceiling is a *second* deadline rather than a longer idle one, so the
+/// A-16 behaviour is untouched: a long stream that is genuinely producing text
+/// still completes (see `a_long_stream_is_not_truncated_mid_answer`).
+#[test]
+fn keepalives_without_content_hit_the_absolute_ceiling() {
+    need_mock!("keepaliveOnly");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    let started = std::time::Instant::now();
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "概述这篇论文")]),
+        rx,
+        &sink,
+        // A generous idle deadline: the keepalives satisfy it easily, which is
+        // the whole point — a test with a short idle deadline would pass for the
+        // wrong reason.
+        Duration::from_secs(60),
+        Duration::from_secs(2),
+    ));
+    let elapsed = started.elapsed();
+
+    match c.terminal() {
+        Some(AiStreamEvent::Error { code, safe_message }) => {
+            assert_eq!(code, "ai_first_token_timeout", "wrong code: {safe_message}");
+            assert!(
+                safe_message.contains("没有收到任何内容"),
+                "must say nothing arrived, not that the connection went quiet: {safe_message}"
+            );
+        }
+        other => panic!("expected a first-token timeout, got {other:?}"),
+    }
+    assert!(c.text().is_empty(), "there was never any content to keep");
+    assert!(
+        elapsed.as_secs() < 30,
+        "must be bounded by the ceiling, took {elapsed:?}"
+    );
+}
+
+/// The ceiling must not fire once content has arrived, however slow the stream.
+#[test]
+fn a_slow_stream_with_content_is_not_killed_by_the_ceiling() {
+    need_mock!("longHealthy");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "概述这篇论文")]),
+        rx,
+        &sink,
+        Duration::from_secs(5),
+        // Shorter than the ~21 s the stream needs. It must not matter: the
+        // ceiling exists for silence, not for slowness.
+        Duration::from_secs(3),
+    ));
+
+    assert!(
+        matches!(c.terminal(), Some(AiStreamEvent::Completed { .. })),
+        "a producing stream must run to completion, got {:?}",
+        c.terminal()
+    );
+    assert_eq!(c.text().matches('段').count(), 24);
 }

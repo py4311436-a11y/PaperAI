@@ -21,7 +21,9 @@ use tokio::sync::watch;
 
 use crate::error::{codes, AppError, AppResult};
 
-use super::client::{self, classify_status, classify_transport, FIRST_TOKEN_TIMEOUT};
+use super::client::{
+    self, classify_status, classify_transport, FIRST_CONTENT_CEILING, FIRST_TOKEN_TIMEOUT,
+};
 use super::{config, settings};
 use super::secrets;
 use super::stream::{SseEvent, SseParser};
@@ -188,7 +190,15 @@ pub async fn run_chat<S>(
 ) where
     S: Fn(AiStreamEvent) + Send + Sync,
 {
-    run_chat_with_deadlines(provider, req, cancel, sink, FIRST_TOKEN_TIMEOUT).await
+    run_chat_with_deadlines(
+        provider,
+        req,
+        cancel,
+        sink,
+        FIRST_TOKEN_TIMEOUT,
+        FIRST_CONTENT_CEILING,
+    )
+    .await
 }
 
 /// [`run_chat`] with the stall deadline supplied by the caller.
@@ -203,6 +213,11 @@ pub async fn run_chat_with_deadlines<S>(
     mut cancel: watch::Receiver<bool>,
     sink: &S,
     stall_timeout: std::time::Duration,
+    // Absolute ceiling for the first content, reset by nothing. A parameter
+    // rather than the constant so tests can use seconds instead of minutes and
+    // drive the same loop that ships — the pattern this module already follows
+    // for `stall_timeout`.
+    first_content_ceiling: std::time::Duration,
 ) where
     S: Fn(AiStreamEvent) + Send + Sync,
 {
@@ -278,6 +293,21 @@ pub async fn run_chat_with_deadlines<S>(
     // request deadline — is what bounds a hung provider (A-16).
     let mut deadline = tokio::time::Instant::now() + stall_timeout;
 
+    // A second, absolute deadline that nothing resets: the first *content* must
+    // arrive within this window, keepalives or not.
+    //
+    // Why the idle deadline alone is not enough: an SSE stream that sends a
+    // comment line or a role-only chunk every 20 seconds is alive by every
+    // measure the idle timer has, while the user watches an empty answer for
+    // minutes. Observed exactly that with a seven-image request through a
+    // gateway — bytes kept arriving, not one of them was text, and the 60-second
+    // first-token timeout never fired because each byte reset it.
+    //
+    // Generous on purpose: uploading several page images genuinely takes a while
+    // before the first token, and cutting that off would break the feature this
+    // deadline exists to protect.
+    let first_content_deadline = started + first_content_ceiling;
+
     loop {
         tokio::select! {
             biased;
@@ -286,6 +316,23 @@ pub async fn run_chat_with_deadlines<S>(
                 sink(AiStreamEvent::Cancelled);
                 // Dropping `body` here closes the connection instead of waiting
                 // for a provider that may never send more bytes.
+                return;
+            }
+
+            _ = tokio::time::sleep_until(first_content_deadline.into()), if !saw_any => {
+                // No text at all by the absolute ceiling. Reported separately
+                // from the idle timeout because the causes differ and so do the
+                // fixes: an idle timeout means the connection went quiet, this
+                // one means it stayed busy without producing an answer.
+                sink(AiStreamEvent::Error {
+                    code: codes::AI_FIRST_TOKEN_TIMEOUT.to_string(),
+                    safe_message: format!(
+                        "等待模型响应超时：连接一直有活动，但 {} 秒内没有收到任何内容。\
+                         常见原因是请求过大（例如整篇以图片发送）或模型不支持图片输入。\
+                         可以改用更小的上下文范围，或减少发送的页码。",
+                        first_content_ceiling.as_secs()
+                    ),
+                });
                 return;
             }
 
