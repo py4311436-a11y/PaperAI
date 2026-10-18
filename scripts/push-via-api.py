@@ -74,40 +74,36 @@ def call(method: str, url: str, body=None):
         raise SystemExit(f"{method} {url}\nHTTP {e.code}: {detail}")
 
 
-def push_one(commit: str) -> str:
-    """Push one commit as a fast-forward. Returns the SHA the remote now has."""
+def push_one(commit: str, base_tree: str) -> str:
+    """
+    Push one commit as a fast-forward. Returns the tree the remote now holds.
+
+    `base_tree` is passed in rather than derived from the parent SHA, because
+    after the first push the parent may be a server-side commit git has never
+    seen and cannot resolve. Keeping it explicit also means the base is always
+    the tree the remote actually reported, not a local guess about it.
+    """
     tree = git("rev-parse", f"{commit}^{{tree}}")
     message = git("log", "-1", "--format=%B", commit).rstrip("\n")
+    parent = git("rev-parse", f"{commit}^")
     print(f"\n{'=' * 60}\ncommit  {commit}")
-    print(f"parent  {git('rev-parse', f'{commit}^')}")
+    print(f"parent  {parent}")
     print(f"tree    {tree}")
+    print(f"base    {base_tree}")
 
     # 1. Fast-forward check, before touching anything.
     #
-    #    This also handles the case where the same content is already on the
-    #    remote under a different SHA. A commit pushed through this script is
-    #    rebuilt server-side and gets a new SHA: the tree and message survive,
-    #    but the original author/committer metadata does not. The next commit
-    #    then names a parent the remote has never seen and looks like a
-    #    divergence.
-    #
-    #    So when the remote HEAD's tree equals this commit's *parent* tree, the
-    #    remote is simply using a different name for the same commit, and we
-    #    adopt its SHA. A commit is its tree plus its parents, and the tree is
-    #    byte-identical by construction.
-    #
-    #    The tree is the whole test. Comparing this commit's own tree would be
-    #    wrong -- it is the work being pushed, so it naturally differs.
+    #    The remote may name this commit's parent under a different SHA -- every
+    #    API push rebuilds the commit server-side, losing the original metadata,
+    #    so an equal tree under a different name is still the same commit.
     remote = call("GET", f"{API}/git/ref/heads/{BRANCH}")
     remote_sha = remote["object"]["sha"]
     remote_head = call("GET", f"{API}/git/commits/{remote_sha}")
-    parent = git("rev-parse", f"{commit}^")
+    remote_tree = remote_head.get("tree", {}).get("sha")
     print(f"remote  {remote_sha}")
 
     if remote_sha != parent:
-        parent_tree = git("rev-parse", f"{parent}^{{tree}}")
-        remote_tree = remote_head.get("tree", {}).get("sha")
-        if remote_tree == parent_tree:
+        if remote_tree == base_tree:
             print(
                 f"\nremote HEAD is this commit's parent under a different SHA\n"
                 f"  (remote {remote_sha[:7]} == local {parent[:7]}, same tree)"
@@ -117,7 +113,7 @@ def push_one(commit: str) -> str:
             raise SystemExit(
                 f"NOT a fast-forward: remote is {remote_sha[:7]}, parent is {parent[:7]}.\n"
                 f"  remote tree {remote_tree}\n"
-                f"  parent tree {parent_tree}\n"
+                f"  expected   {base_tree}\n"
                 "The trees differ, so the branch moved in a way this script did not\n"
                 "make. Fetch and inspect before pushing."
             )
@@ -161,10 +157,10 @@ def push_one(commit: str) -> str:
     #    re-uploading all 400-odd entries. Untouched paths are carried over by
     #    SHA and cannot drift.
     new_tree = call("POST", f"{API}/git/trees", {
-        "base_tree": git("rev-parse", f"{parent}^{{tree}}"),
+        "base_tree": base_tree,
         "tree": entries,
     })
-    print(f"tree {git('rev-parse', f'{parent}^{{tree}}')[:7]} -> {new_tree['sha'][:7]}")
+    print(f"tree {base_tree[:7]} -> {new_tree['sha'][:7]}")
 
     created = call("POST", f"{API}/git/commits", {
         "message": message,
@@ -178,7 +174,7 @@ def push_one(commit: str) -> str:
         "force": False,
     })
     print(f"branch {BRANCH} -> {updated['object']['sha']}")
-    return new_sha
+    return new_tree["sha"]
 
 
 def main() -> None:
@@ -230,10 +226,9 @@ def main() -> None:
         return
 
     print(f"{len(chain)} commit(s) to push, oldest first\n")
+    current_tree = remote_tree
     for sha in chain:
-        push_one(sha)
-        now = call("GET", f"{API}/git/ref/heads/{BRANCH}")["object"]["sha"]
-        print(f"  -> remote is now {now[:7]}")
+        current_tree = push_one(sha, current_tree)
 
 
 if __name__ == "__main__":
