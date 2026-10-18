@@ -207,6 +207,37 @@ and the right behaviour.
 
 ---
 
+### A-25 — FIXED in 0.6.3: the composer swallowed Enter from the input method
+
+A question typed into the composer would not send. Nothing was wrong with
+`submit()` — the Enter handler was intercepting the keypress an IME uses to
+*commit a candidate*.
+
+Typing Chinese means every Enter is a composition key first and a send only
+second, and `key` cannot tell them apart: both are `"Enter"`. Treating a
+composition Enter as a send breaks the question two ways at once — the candidate
+never lands in the box, and a question goes out built from whatever
+half-finished pinyin happened to be in the field. Because the app is a Chinese
+reading tool, this made the composer unusable in its primary language.
+
+The platform does distinguish them, and it is the only thing that can:
+`e.isComposing`, plus `keyCode: 229` as the Windows signal. Either one alone is
+honoured, because neither is universal across input methods and the failure is
+silent — the question simply does not appear, with nothing in the UI to explain
+why. Shift+Enter is not composition-sensitive, so it is untouched.
+
+Five tests, negative-controlled: removing the guard fails exactly the two IME
+assertions. One of them asserts the send *button* still works, so the fix cannot
+be satisfied by disabling Enter altogether.
+
+**A shim gap surfaced along the way.** The new tests first failed with
+`row.replaceChildren is not a function` — the DOM shim was missing the method the
+panel uses to swap a `<select>`'s options, so the tests died before reaching
+their own assertions. That is the same failure mode as `childElementCount` in
+0.5.1: a test that cannot reach its assertion "passes" for the wrong reason.
+`replaceChildren` is now implemented. Worth watching for on any new DOM method
+the panel starts using.
+
 ### A-24 — FIXED in 0.6.3: the Zhipu free preset defaulted to a retired model id
 
 The preset's default model, `glm-4.6v-flash`, stopped working: Zhipu's free
@@ -638,3 +669,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | — | URLs with balanced parentheses were truncated at the first `)` |
 | — | `secrets.rs` compared an `HRESULT` against a raw Win32 code, so a missing key surfaced as `ai_secret_store` instead of `ai_no_key` |
 | A-24 | The Zhipu free preset defaulted to a retired model id, and a 401-based probe could not have caught it |
+| A-25 | The composer treated an input method's Enter (committing a candidate) as a send, making it unusable in Chinese |

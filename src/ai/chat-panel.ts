@@ -199,7 +199,23 @@ export class ChatPanel {
     this.input.rows = 3;
     this.input.placeholder = "就这篇论文提问…（Enter 发送，Shift+Enter 换行）";
     this.input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      // An input method owns Enter while it is composing.
+      //
+      // Typing Chinese means every Enter is a composition key first — it commits
+      // the highlighted candidate — and a send only second. Both are `"Enter"`,
+      // so `key` cannot tell them apart, and treating a composition Enter as a
+      // send breaks the question two ways at once: the candidate never lands in
+      // the box, and a question goes out built from whatever half-finished
+      // pinyin was in the field.
+      //
+      // The platform does distinguish them. `isComposing` is the standard signal;
+      // `keyCode: 229` is what Windows input methods report, and either one alone
+      // is enough. Both are honoured because getting this wrong is silent — the
+      // question simply never appears — and one of the two is not universal.
+      //
+      // Shift+Enter is never a send, so it is not composition-sensitive.
+      const imeOwnsIt = e.isComposing || e.keyCode === 229;
+      if (e.key === "Enter" && !e.shiftKey && !imeOwnsIt) {
         e.preventDefault();
         this.submit();
       }

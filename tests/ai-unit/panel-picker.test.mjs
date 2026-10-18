@@ -316,3 +316,131 @@ test("going back to an empty transcript restores the placeholder", () => {
   assert.equal(panel.root.querySelectorAll(".ai-turn-assistant").length, 0);
   assert.ok(panel.root.querySelector(".ai-empty"), "the placeholder must come back");
 });
+
+/* ------------------------------------------- A-25: the composer and the IME */
+
+/**
+ * The reported symptom: a question typed into the composer would not send.
+ *
+ * Nothing was wrong with `submit()` — the Enter handler was intercepting the
+ * keypress the input method uses to *commit a candidate*. Typing Chinese means
+ * every Enter is a composition key first and a send only second, and the
+ * handler cannot tell the two apart by `key` alone: both are `"Enter"`.
+ *
+ * The web platform does distinguish them, and it is the only thing that can:
+ * a keydown during composition carries `isComposing: true` (and on Windows,
+ * `keyCode: 229`). Treating that Enter as a send does two wrong things at once
+ * — it swallows the candidate, so the character never lands in the box, and it
+ * fires a question built from whatever half-finished pinyin happened to be in
+ * the field.
+ *
+ * `makePanel` here captures sends, so a test can assert on what the user would
+ * actually have seen.
+ */
+function makeTypingPanel() {
+  const calls = { sent: [] };
+  const panel = new ChatPanel({
+    onSend: (q, attachments) => calls.sent.push([q, attachments]),
+    onStop: () => {},
+    onNewConversation: () => {},
+    onContextModeChange: () => {},
+    onOpenSettings: () => {},
+    onOpenLink: () => {},
+    onCopy: () => {},
+    onSelectProfile: () => {},
+    onSelectModel: () => {},
+  });
+  return { panel, calls };
+}
+
+/** A keydown as the browser delivers it. `isComposing` is what IME sets. */
+function key(key, over = {}) {
+  let prevented = false;
+  return {
+    key,
+    shiftKey: false,
+    isComposing: false,
+    keyCode: over.keyCode ?? 0,
+    preventDefault() {
+      prevented = true;
+      this.defaultPrevented = true;
+    },
+    get wasPrevented() {
+      return prevented;
+    },
+  };
+}
+
+test("Enter that commits an IME candidate does not send the question", () => {
+  const { panel, calls } = makeTypingPanel();
+  const input = panel.root.querySelector("#ai-input");
+  input.value = "ni hao";
+
+  // What the browser sends while the input method is still composing: Enter,
+  // but flagged. This one must be left entirely alone.
+  const ev = key("Enter", { keyCode: 229 });
+  ev.isComposing = true;
+  input.fire("keydown", ev);
+
+  assert.equal(calls.sent.length, 0, "an Enter that commits a candidate must not send");
+  assert.equal(ev.wasPrevented, false, "and must not be swallowed either — that is the character");
+  assert.equal(input.value, "ni hao", "the half-finished pinyin must still be in the box");
+});
+
+test("Enter after composition finished sends, as the placeholder promises", () => {
+  const { panel, calls } = makeTypingPanel();
+  const input = panel.root.querySelector("#ai-input");
+  input.value = "你好";
+
+  // The IME is done: the text is committed and now Enter means send.
+  const ev = key("Enter");
+  ev.isComposing = false;
+  input.fire("keydown", ev);
+
+  assert.equal(calls.sent.length, 1, "a plain Enter must still send");
+  assert.equal(calls.sent[0][0], "你好");
+  assert.equal(ev.wasPrevented, true, "and must not also insert a newline");
+  assert.equal(input.value, "", "the box is cleared for the next question");
+});
+
+test("the 229 keycode alone is enough to mean 'the IME owns this key'", () => {
+  // Some input methods report keyCode 229 without a reliable isComposing, so
+  // either signal alone has to be honoured. Getting this wrong means the
+  // composer eats the user's Chinese and sends pinyin instead.
+  const { panel, calls } = makeTypingPanel();
+  const input = panel.root.querySelector("#ai-input");
+  input.value = "zhong wen";
+
+  input.fire("keydown", key("Enter", { keyCode: 229 }));
+  assert.equal(calls.sent.length, 0, "229 must be treated as a composition key");
+
+  input.value = "中文";
+  input.fire("keydown", key("Enter"));
+  assert.equal(calls.sent.length, 1, "a normal Enter right after must still send");
+});
+
+test("Shift+Enter still inserts a newline mid-composition", () => {
+  // Shift+Enter is never a send, so there is nothing to guard — but the guard
+  // must not swallow it either, or multi-line questions become impossible to
+  // type in an IME.
+  const { panel, calls } = makeTypingPanel();
+  const input = panel.root.querySelector("#ai-input");
+  input.value = "第一行";
+
+  const ev = key("Enter", { keyCode: 229 });
+  ev.shiftKey = true;
+  input.fire("keydown", ev);
+
+  assert.equal(calls.sent.length, 0);
+  assert.equal(ev.wasPrevented, false, "Shift+Enter must reach the input element");
+});
+
+test("the send button works regardless of the input method", () => {
+  // The IME bug must not have an unfair advantage: there is always a button.
+  const { panel, calls } = makeTypingPanel();
+  const input = panel.root.querySelector("#ai-input");
+  input.value = "用按钮发送";
+  panel.root.querySelector("#ai-send").fire("click", {});
+  assert.equal(calls.sent.length, 1);
+  assert.equal(calls.sent[0][0], "用按钮发送");
+});

@@ -123,6 +123,22 @@ export class ShimNode {
     if (this.parentNode) this.parentNode.removeChild(this);
   }
 
+  /**
+   * Replace every child in one step, as the real DOM does.
+   *
+   * The panel uses it to swap the model `<select>`'s options. Without it the
+   * tests that touch the composer threw `row.replaceChildren is not a function`
+   * before reaching their own assertions — so they failed for a reason that had
+   * nothing to do with what they were checking, which is how a test ends up
+   * "proving" the wrong thing. Same class of gap as `childElementCount` in
+   * 0.5.1.
+   */
+  replaceChildren(...nodes) {
+    for (const old of this.childNodes) old.parentNode = null;
+    this.childNodes.length = 0;
+    this.append(...nodes);
+  }
+
   replaceChild(next, old) {
     const i = this.childNodes.indexOf(old);
     if (i < 0) throw new Error("replaceChild: old node is not a child");
