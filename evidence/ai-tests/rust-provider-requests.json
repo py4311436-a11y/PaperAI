@@ -420,6 +420,26 @@
     }
   },
   {
+    "test": "a_stalled_answer_after_content_is_cut_off",
+    "scenario": "contentThenKeepalive",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "图9的纵坐标是什么",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
     "test": "a_collected_answer_contains_every_delta",
     "scenario": "slow",
     "method": "POST",

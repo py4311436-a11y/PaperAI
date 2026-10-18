@@ -26,6 +26,19 @@ pub const FIRST_TOKEN_TIMEOUT: Duration = Duration::from_secs(60);
 /// upload them before the model can start, and that is legitimate work rather
 /// than a stall.
 pub const FIRST_CONTENT_CEILING: Duration = Duration::from_secs(180);
+
+/// Ceiling on a gap between pieces of *content*, once the answer has started.
+///
+/// The idle timeout cannot bound this: it is reset by any byte, and a gateway
+/// that keeps a stalled stream alive with comments and role-only chunks satisfies
+/// it forever. Observed on a real request — the model said one sentence, then
+/// nothing for seven minutes while the socket stayed chatty, and the first-content
+/// ceiling no longer applied because content had already arrived.
+///
+/// Reset only by progress (text or a tool-call fragment), so it measures "is this
+/// still producing anything" rather than "is the socket open". Generous, because
+/// a reasoning model legitimately pauses; a pause this long is not a pause.
+pub const NO_PROGRESS_CEILING: Duration = Duration::from_secs(120);
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Build the shared client. Cheap to clone (it is an `Arc` inside).

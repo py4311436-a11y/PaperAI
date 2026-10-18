@@ -207,6 +207,41 @@ and the right behaviour.
 
 ---
 
+### A-38 — 0.7.3: an answer that stops mid-sentence is now bounded, and logged
+
+**The stall.** The model said one sentence — "我需要查看图 9 所在的页面。" — and the
+transcript sat at "生成中…" for seven minutes. Not alive: nothing was coming.
+
+The 0.7.0 ceiling could not help. It was guarded by `if !saw_any`, so it only
+applied *before* the first content; once a sentence arrived it switched itself
+off. What remained was the idle timeout, which is reset by any byte — and a
+chatty gateway emits SSE comments and role-only chunks precisely to keep a stream
+looking alive. So the two deadlines together bounded "a connection that says
+nothing" and "a connection that is silent", but not "a connection that keeps
+talking without producing anything".
+
+Now there is one deadline that is reset only by *progress* — text or a tool-call
+fragment — so it measures "is this still producing?" rather than "is the socket
+open?". 180 s for the first content, 120 s for each gap after that.
+
+**The wrong error code.** The branch had the message "回答生成到一半停住了" but the
+code `ai_first_token_timeout`. The UI maps codes to text, so the user would have
+been told to check their Base URL because nothing had arrived — after it had.
+A test caught it, because the test asserts on the code and not just the message.
+This is the second time this exact mismatch appeared (A-16 fixed it for the idle
+branch); the lesson is that a message and a code edited together must be
+*asserted* together.
+
+**The log.** `%LOCALAPPDATA%\PaperAI\paperai.log` recorded the request *starting*
+(model, host, status, payload size) and nothing about how it ended. A seven-minute
+stall left one `status=200` line and no way to answer "did it finish, get cut
+off, or never start?" — from the machine or from me. Every request now logs one
+line when it ends: `completed finish=stop`, `tool_calls n=1`, `cancelled`, or
+`error code=ai_timeout`, with elapsed milliseconds. No content, ever.
+
+The mapping lives in `end_kind` and is tested, so an event variant added later
+without a branch stops compiling rather than going silently unlogged.
+
 ### B — 0.7.0: the model can ask for a page, and the app fetches it
 
 The feature the notes were for. With notes standing in for the document, a
@@ -1080,3 +1115,5 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-35 | A restored turn saved mid-stream made the app permanently busy, so sending was dead from startup. Snapshots were taken after the guard |
 | A-36 | A session created after the provider was chosen had no provider bound, so the first send was refused; `selection` was hardcoded as the default mode |
 | B | 0.7.0: the model can call `read_page` to fetch one page image mid-answer, capped at 2 pages per question; tool calling rather than a text marker, because a document could forge a marker |
+| A-37 | 0.7.2: a notes request was refused as a blank scan, because the guard keyed on `pages_sent` (empty for notes) instead of document content |
+| A-38 | 0.7.3: an answer that stopped mid-sentence was unbounded — the ceiling only applied before the first content; and stream endings were not logged |

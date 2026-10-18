@@ -216,6 +216,28 @@ const scenarios = {
   }),
 
   /**
+   * One sentence, then nothing but keepalives forever.
+   *
+   * Exactly the observed failure: the model said "我需要查看图 9 所在的页面。" and
+   * then the stream stayed busy for seven minutes without another word. The idle
+   * timeout cannot catch it (bytes keep arriving) and the first-content ceiling no
+   * longer applies (content already came).
+   */
+  contentThenKeepalive: (model) => ({
+    status: 200,
+    slow: true,
+    makeBuffers: () => {
+      const out = [Buffer.from(sseChunk(model, { content: "我需要查看图 9 所在的页面。" }))];
+      for (let i = 0; i < 40; i++) {
+        out.push(Buffer.from(": keepalive\n\n"));
+        out.push(Buffer.from(sseChunk(model, { role: "assistant" })));
+      }
+      return out;
+    },
+    gapMs: 300,
+  }),
+
+  /**
    * A-16: output stops half-way and the connection is then held open forever.
    *
    * The provider is not slow here, it is gone: nothing more will ever arrive.

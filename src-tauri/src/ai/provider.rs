@@ -23,6 +23,7 @@ use crate::error::{codes, AppError, AppResult};
 
 use super::client::{
     self, classify_status, classify_transport, FIRST_CONTENT_CEILING, FIRST_TOKEN_TIMEOUT,
+    NO_PROGRESS_CEILING,
 };
 use super::{config, settings};
 use super::secrets;
@@ -200,6 +201,7 @@ pub async fn run_chat<S>(
         sink,
         FIRST_TOKEN_TIMEOUT,
         FIRST_CONTENT_CEILING,
+        NO_PROGRESS_CEILING,
     )
     .await
 }
@@ -221,6 +223,9 @@ pub async fn run_chat_with_deadlines<S>(
     // drive the same loop that ships — the pattern this module already follows
     // for `stall_timeout`.
     first_content_ceiling: std::time::Duration,
+    // Ceiling on a gap between content pieces once the answer has started. A
+    // parameter for the same reason as the others: the tests need seconds.
+    no_progress_ceiling: std::time::Duration,
 ) where
     S: Fn(AiStreamEvent) + Send + Sync,
 {
@@ -298,6 +303,28 @@ pub async fn run_chat_with_deadlines<S>(
     let mut saw_any = false;
     let mut calls = crate::ai::stream::ToolCallAccumulator::new();
 
+    // Wrap the sink so every request records *how it ended*, in one place.
+    //
+    // `audit_outcome` already logs the request starting (model, host, status,
+    // payload size) but nothing recorded the ending, so a seven-minute stall left
+    // one `status=200` line and no way to tell whether the stream finished, was
+    // cut off, or was answered from a cache. One line per request, never any
+    // content: kind, elapsed, and the error code when there is one.
+    let model_tag = req.model.clone();
+    // Atomic rather than Cell: the sink must be `Sync`, and a Cell is not.
+    let end_logged = std::sync::atomic::AtomicBool::new(false);
+    let emit_logged = |ev: AiStreamEvent| {
+        if let Some(kind) = end_kind(&ev) {
+            if !end_logged.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                crate::audit(&format!(
+                    "ai: stream end model={model_tag} {kind} elapsed_ms={}",
+                    started.elapsed().as_millis()
+                ));
+            }
+        }
+        sink(ev);
+    };
+
     // Stall deadline: measured from the moment the request was accepted, reset
     // on every chunk so it acts as an idle timeout too. This — not a total
     // request deadline — is what bounds a hung provider (A-16).
@@ -316,32 +343,52 @@ pub async fn run_chat_with_deadlines<S>(
     // Generous on purpose: uploading several page images genuinely takes a while
     // before the first token, and cutting that off would break the feature this
     // deadline exists to protect.
-    let first_content_deadline = started + first_content_ceiling;
+    //
+    // Reset by *progress* rather than by any byte. See `NO_PROGRESS_CEILING`:
+    // keepalives keep a dead answer looking alive, and once content has arrived
+    // the first-content ceiling no longer applies to anything.
+    let mut content_deadline = tokio::time::Instant::now() + first_content_ceiling;
 
     loop {
         tokio::select! {
             biased;
 
             _ = wait_cancel(&mut cancel) => {
-                sink(AiStreamEvent::Cancelled);
+                emit_logged(AiStreamEvent::Cancelled);
                 // Dropping `body` here closes the connection instead of waiting
                 // for a provider that may never send more bytes.
                 return;
             }
 
-            _ = tokio::time::sleep_until(first_content_deadline.into()), if !saw_any => {
-                // No text at all by the absolute ceiling. Reported separately
-                // from the idle timeout because the causes differ and so do the
-                // fixes: an idle timeout means the connection went quiet, this
-                // one means it stayed busy without producing an answer.
-                sink(AiStreamEvent::Error {
-                    code: codes::AI_FIRST_TOKEN_TIMEOUT.to_string(),
-                    safe_message: format!(
-                        "等待模型响应超时：连接一直有活动，但 {} 秒内没有收到任何内容。\
-                         常见原因是请求过大（例如整篇以图片发送）或模型不支持图片输入。\
-                         可以改用更小的上下文范围，或减少发送的页码。",
-                        first_content_ceiling.as_secs()
-                    ),
+            _ = tokio::time::sleep_until(content_deadline.into()) => {
+                // Two different stalls reach this branch, and the code has to
+                // match the message: no content at all is a first-token timeout,
+                // content that then stops is a mid-answer interruption. Sending
+                // `ai_first_token_timeout` with a "停住了" message makes the UI
+                // report the wrong cause — the same defect A-16 fixed for the
+                // idle branch, repeated here until a test caught it.
+                let code = if saw_any {
+                    codes::AI_TIMEOUT
+                } else {
+                    codes::AI_FIRST_TOKEN_TIMEOUT
+                };
+                emit_logged(AiStreamEvent::Error {
+                    code: code.to_string(),
+                    safe_message: if saw_any {
+                        format!(
+                            "回答生成到一半停住了：连接仍有活动，但已 {} 秒没有新的内容。\
+                             这不是连接断开，而是服务端没有再往下输出。可以重试，\
+                             或改用更小的上下文范围。",
+                            no_progress_ceiling.as_secs()
+                        )
+                    } else {
+                        format!(
+                            "等待模型响应超时：连接一直有活动，但 {} 秒内没有收到任何内容。\
+                             常见原因是请求过大（例如整篇以图片发送）或模型不支持图片输入。\
+                             可以改用更小的上下文范围，或减少发送的页码。",
+                            first_content_ceiling.as_secs()
+                        )
+                    },
                 });
                 return;
             }
@@ -364,7 +411,7 @@ pub async fn run_chat_with_deadlines<S>(
                         "等待模型响应超时：连接已建立，但一直没有收到内容。请检查 Base URL 与模型名。",
                     )
                 };
-                sink(AiStreamEvent::Error { code: code.to_string(), safe_message: msg.to_string() });
+                emit_logged(AiStreamEvent::Error { code: code.to_string(), safe_message: msg.to_string() });
                 return;
             }
 
@@ -372,7 +419,7 @@ pub async fn run_chat_with_deadlines<S>(
                 match item {
                     None => {
                         for ev in parser.finish() {
-                            if !apply(ev, &mut saw_any, &mut calls, sink) {
+                            if !apply(ev, &mut saw_any, &mut calls, &emit_logged) {
                                 return;
                             }
                         }
@@ -383,9 +430,9 @@ pub async fn run_chat_with_deadlines<S>(
                             // Many gateways omit [DONE]; a clean close after
                             // content — or after a tool call — is a successful
                             // completion.
-                            sink(terminal(&calls, None));
+                            emit_logged(terminal(&calls, None));
                         } else {
-                            sink(AiStreamEvent::Error {
+                            emit_logged(AiStreamEvent::Error {
                                 code: codes::AI_BAD_STREAM.to_string(),
                                 safe_message: "服务未返回任何内容。请确认它支持 OpenAI 兼容的 \
                                                Chat Completions 流式接口。"
@@ -394,11 +441,21 @@ pub async fn run_chat_with_deadlines<S>(
                         }
                         return;
                     }
-                    Some(Err(e)) => return fail(sink, classify_transport(&e)),
+                    Some(Err(e)) => return fail(&emit_logged, classify_transport(&e)),
                     Some(Ok(bytes)) => {
                         deadline = tokio::time::Instant::now() + stall_timeout;
                         for ev in parser.push(&bytes) {
-                            if !apply(ev, &mut saw_any, &mut calls, sink) {
+                            // Progress means *produced something*, not "a byte
+                            // arrived". Keepalive comments and role-only chunks
+                            // pass through here without resetting the clock.
+                            if let SseEvent::Chunk(c) = &ev {
+                                let text = c.content.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+                                if text || !c.tool_calls.is_empty() {
+                                    content_deadline =
+                                        tokio::time::Instant::now() + no_progress_ceiling;
+                                }
+                            }
+                            if !apply(ev, &mut saw_any, &mut calls, &emit_logged) {
                                 return;
                             }
                         }
@@ -601,6 +658,24 @@ fn apply<S: Fn(AiStreamEvent)>(
             }
             true
         }
+    }
+}
+
+/// How a stream ended, as a log fragment, or `None` for a non-terminal event.
+///
+/// A separate function so the mapping is testable: an event type added later
+/// without a branch here would be silently unlogged, which is exactly the state
+/// that made a seven-minute stall undiagnosable in the first place.
+fn end_kind(ev: &AiStreamEvent) -> Option<String> {
+    match ev {
+        AiStreamEvent::Started | AiStreamEvent::Delta { .. } => None,
+        AiStreamEvent::Completed { finish_reason } => Some(format!(
+            "completed finish={}",
+            finish_reason.as_deref().unwrap_or("-")
+        )),
+        AiStreamEvent::Cancelled => Some("cancelled".to_string()),
+        AiStreamEvent::Error { code, .. } => Some(format!("error code={code}")),
+        AiStreamEvent::ToolCalls { calls } => Some(format!("tool_calls n={}", calls.len())),
     }
 }
 
@@ -837,6 +912,37 @@ mod tests {
                 detail: None,
             },
         }
+    }
+
+    /// Every terminal event must produce a log fragment.
+    ///
+    /// The failure this prevents: a stall left only `status=200` in the log and
+    /// no ending at all, so "did it finish, get cut off, or was it never
+    /// answered?" was unanswerable from the machine. If a new variant is added
+    /// without a branch here the match stops compiling, which is the point.
+    #[test]
+    fn every_terminal_event_is_loggable() {
+        assert_eq!(end_kind(&AiStreamEvent::Started), None);
+        assert_eq!(end_kind(&AiStreamEvent::Delta { text: "x".into() }), None);
+
+        assert!(end_kind(&AiStreamEvent::Completed { finish_reason: None })
+            .unwrap()
+            .contains("finish=-"));
+        assert!(end_kind(&AiStreamEvent::Completed {
+            finish_reason: Some("stop".into())
+        })
+        .unwrap()
+        .contains("stop"));
+        assert_eq!(end_kind(&AiStreamEvent::Cancelled).unwrap(), "cancelled");
+        assert!(end_kind(&AiStreamEvent::Error {
+            code: "ai_timeout".into(),
+            safe_message: "x".into()
+        })
+        .unwrap()
+        .contains("ai_timeout"));
+        assert!(end_kind(&AiStreamEvent::ToolCalls { calls: vec![] })
+            .unwrap()
+            .contains("n=0"));
     }
 
     /// A plain chat request must stay minimal.

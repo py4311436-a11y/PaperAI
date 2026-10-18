@@ -52,6 +52,7 @@ const PLAN = [
   ["a_stream_that_stops_mid_answer_is_reported_as_interrupted", "stallAfterContent"],
   ["keepalives_without_content_hit_the_absolute_ceiling", "keepaliveOnly"],
   ["a_slow_stream_with_content_is_not_killed_by_the_ceiling", "longHealthy"],
+  ["a_stalled_answer_after_content_is_cut_off", "contentThenKeepalive"],
   ["a_collected_answer_contains_every_delta", "slow"],
   ["a_collected_answer_is_empty_when_nothing_arrives", "abruptEmpty"],
   ["context_is_sent_verbatim_and_nothing_else", "happy"],

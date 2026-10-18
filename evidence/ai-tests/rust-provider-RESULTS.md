@@ -1,6 +1,6 @@
 # Rust provider integration suite (against local Mock SSE)
 
-Generated: 2026-10-18T15:20:55.876Z
+Generated: 2026-10-18T15:59:23.341Z
 Runner: scripts/run-ai-rust-tests.mjs
 
 | Test | Mock scenario | Result | Requests seen by mock |
@@ -28,6 +28,7 @@ Runner: scripts/run-ai-rust-tests.mjs
 | a_stream_that_stops_mid_answer_is_reported_as_interrupted | stallAfterContent | **PASS** | 1 |
 | keepalives_without_content_hit_the_absolute_ceiling | keepaliveOnly | **PASS** | 1 |
 | a_slow_stream_with_content_is_not_killed_by_the_ceiling | longHealthy | **PASS** | 1 |
+| a_stalled_answer_after_content_is_cut_off | contentThenKeepalive | **PASS** | 1 |
 | a_collected_answer_contains_every_delta | slow | **PASS** | 1 |
 | a_collected_answer_is_empty_when_nothing_arrives | abruptEmpty | **PASS** | 1 |
 | context_is_sent_verbatim_and_nothing_else | happy | **PASS** | 1 |
@@ -38,7 +39,7 @@ Runner: scripts/run-ai-rust-tests.mjs
 | a_model_catalogue_request_carries_no_session_header | happy | **PASS** | 1 |
 | cargo test --lib (unit layer) | — | **PASS** | 0 |
 
-**32/32 PASS**
+**33/33 PASS**
 
 The mock redacts `Authorization` before recording, so
 `rust-provider-requests.json` is safe to archive as evidence.

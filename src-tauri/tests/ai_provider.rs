@@ -522,6 +522,7 @@ fn a_stream_that_stops_mid_answer_is_reported_as_interrupted() {
         // Room for the content ceiling so this test is about the *idle* timeout,
         // which is the one it names.
         Duration::from_secs(30),
+        Duration::from_secs(120),
     ));
 
     match c.terminal() {
@@ -662,6 +663,7 @@ fn keepalives_without_content_hit_the_absolute_ceiling() {
         // wrong reason.
         Duration::from_secs(60),
         Duration::from_secs(2),
+        Duration::from_secs(120),
     ));
     let elapsed = started.elapsed();
 
@@ -701,6 +703,7 @@ fn a_slow_stream_with_content_is_not_killed_by_the_ceiling() {
         // Shorter than the ~21 s the stream needs. It must not matter: the
         // ceiling exists for silence, not for slowness.
         Duration::from_secs(3),
+        Duration::from_secs(120),
     ));
 
     assert!(
@@ -709,4 +712,57 @@ fn a_slow_stream_with_content_is_not_killed_by_the_ceiling() {
         c.terminal()
     );
     assert_eq!(c.text().matches('段').count(), 24);
+}
+
+/// Content arrives, then the stream stalls while staying chatty.
+///
+/// The reported failure: one sentence, then seven minutes of "生成中…". The idle
+/// timeout could not fire (bytes kept arriving) and the first-content ceiling no
+/// longer applied (content had already come), so nothing bounded the request.
+///
+/// The no-progress ceiling is reset only by actual content, so it measures "is
+/// this still producing?" rather than "is the socket open?".
+#[test]
+fn a_stalled_answer_after_content_is_cut_off() {
+    need_mock!("contentThenKeepalive");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    let started = std::time::Instant::now();
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "图9的纵坐标是什么")]),
+        rx,
+        &sink,
+        // Generous idle deadline: the keepalives satisfy it, which is the point.
+        Duration::from_secs(60),
+        // First content arrives almost at once — this ceiling is irrelevant here.
+        Duration::from_secs(30),
+        Duration::from_secs(2),
+    ));
+    let elapsed = started.elapsed();
+
+    match c.terminal() {
+        Some(AiStreamEvent::Error { code, safe_message }) => {
+            assert_eq!(code, "ai_timeout", "wrong code: {safe_message}");
+            assert!(
+                safe_message.contains("停住了"),
+                "must say the answer stopped, not that nothing arrived: {safe_message}"
+            );
+            assert!(
+                !safe_message.contains("一直没有收到内容"),
+                "it DID receive content: {safe_message}"
+            );
+        }
+        other => panic!("expected a stall after content, got {other:?}"),
+    }
+    assert!(
+        c.text().contains("图 9"),
+        "the sentence that did arrive must be kept: {:?}",
+        c.text()
+    );
+    assert!(elapsed.as_secs() < 30, "must be bounded, took {elapsed:?}");
 }
