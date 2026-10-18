@@ -126,11 +126,33 @@ def push_one(commit: str, base_tree: str) -> str:
     # Read the blob from the commit, not from the working tree: a commit is a
     # fixed snapshot, and pushing whatever happens to be on disk right now is
     # how "the thing I tested" stops being "the thing I pushed".
-    changed = git("diff-tree", "--no-commit-id", "--name-only", "-r", commit).splitlines()
-    print(f"{len(changed)} file(s) to upload")
+    #
+    # `--name-status` rather than `--name-only`, because a release commit
+    # deletes the superseded installer as well as adding the new one, and a
+    # deleted path has no blob in the target commit -- `ls-tree <commit> --
+    # <deleted>` returns nothing, and unpacking that crashes. A deletion is
+    # expressed as an entry with no sha, which is how the API removes a path.
+    status_lines = git(
+        "diff-tree", "--no-commit-id", "--name-status", "-r", commit
+    ).splitlines()
+    print(f"{len(status_lines)} file(s) changed")
     entries = []
-    for path in changed:
-        mode, type_, blob_sha = git("ls-tree", commit, "--", path).split()[:3]
+    for line in status_lines:
+        status, _, path = line.partition("\t")
+        if not path:
+            continue
+        if status.startswith("D"):
+            print(f"  DEL {path}")
+            entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+            continue
+
+        listing = git("ls-tree", commit, "--", path).split()
+        if len(listing) < 3:
+            raise SystemExit(
+                f"cannot resolve {path} in commit {commit[:7]} (status {status}); "
+                "refusing to guess at a blob"
+            )
+        mode, type_, blob_sha = listing[:3]
         content = subprocess.run(
             ["git", "cat-file", "blob", blob_sha],
             cwd=r"D:\AIreader\PaperAI-PoC", capture_output=True, check=True,
