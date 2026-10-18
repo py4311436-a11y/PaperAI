@@ -31,6 +31,7 @@
     "src/ai/vision-support.ts",
     "src/tools/erase-policy.ts",
     "src/pdf/text-compose.ts",
+    "src/pdf/wheel-zoom.ts",
     "tests/ai-unit/run.ts"
   ]
 }

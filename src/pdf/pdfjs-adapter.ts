@@ -14,6 +14,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { textFromContentItems } from "./text-compose";
+import { clampZoom, isZoomGesture, zoomFactorFor } from "./wheel-zoom";
 
 export const PDFJS_VERSION: string = (pdfjsLib as unknown as { version: string }).version;
 
@@ -165,6 +166,8 @@ export class PdfjsAdapter {
    * from.
    */
   private pageText = new Map<number, string>();
+  /** Whether the wheel-zoom listener is already attached (see `wireWheelZoom`). */
+  private wheelZoomWired = false;
   /** AnnotationEditorUIManager — captured via EventBus, NOT exported by the lib. */
   private uiManager: any = null;
   private tool: ToolMode = "select";
@@ -188,6 +191,52 @@ export class PdfjsAdapter {
     this.container = opts.container;
     this.viewerEl = opts.viewer;
     this.diagnostics = opts.diagnostics ?? new Diagnostics();
+  }
+
+  /**
+   * Wire the Ctrl+wheel zoom gesture.
+   *
+   * Called from `init()` after the viewer exists, and kept separate so the
+   * listener is attached exactly once — `init()` can be awaited more than once
+   * by a caller that does not know the viewer is already up.
+   *
+   * The listener goes on the scroll container because that is the element the
+   * cursor is over when the user wants to zoom a page: wheel events on the page
+   * bubble through it. Attaching it to `window` instead would also zoom when
+   * the pointer is over the AI panel or the toolbar, which is not what the
+   * gesture means.
+   */
+  private wireWheelZoom(): void {
+    if (this.wheelZoomWired) return;
+    this.wheelZoomWired = true;
+
+    this.container.addEventListener("wheel", (e: WheelEvent) => {
+      if (!isZoomGesture(e)) return;
+
+      // The default action for Ctrl+wheel in a WebView is to zoom the whole
+      // interface, which is not this app's model — there is one zoom, the
+      // document's, and it lives in the toolbar. Prevent it, and only it: a
+      // plain wheel must still scroll.
+      e.preventDefault();
+
+      const factor = zoomFactorFor(e.deltaY, e.deltaMode);
+      if (factor === 1) return;
+
+      const before = this.pdfViewer.currentScale;
+      const after = clampZoom(before * factor);
+      if (after === before) return; // already at an end; nothing to do
+
+      // Anchor on the pointer. Without this the viewer zooms towards its own
+      // centre and the point under the cursor slides away, so the user has to
+      // scroll back after every notch.
+      const origin = [
+        e.clientX - this.container.getBoundingClientRect().left + this.container.scrollLeft,
+        e.clientY - this.container.getBoundingClientRect().top + this.container.scrollTop,
+      ] as [number, number];
+
+      this.pdfViewer.updateScale({ scaleFactor: factor, origin });
+      this.onScaleChanged?.();
+    }, { passive: false });
   }
 
   async init(): Promise<void> {
@@ -219,6 +268,8 @@ export class PdfjsAdapter {
     this.eventBus.on("annotationeditorstatechanged", () => {
       this.markDirty(true);
     });
+
+    this.wireWheelZoom();
 
     this.diagnostics.log("success", `PDF.js ${PDFJS_VERSION} viewer initialised`);
   }

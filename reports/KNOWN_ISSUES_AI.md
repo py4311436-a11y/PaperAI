@@ -207,6 +207,50 @@ and the right behaviour.
 
 ---
 
+### A-27 — 0.6.4: Ctrl+wheel zoom, anchored on the cursor
+
+Hold Ctrl and roll the wheel over the page to zoom. The arithmetic
+(`zoomFactorFor`, `clampZoom`, `isZoomGesture`) is pure and lives in
+`src/pdf/wheel-zoom.ts`; the DOM wiring is in the adapter, kept thin so every
+decision it makes is one of the pure functions'.
+
+**Anchored on the pointer, not the centre.** Handed to the viewer's own
+`origin` option rather than reimplemented — the anchor maths is exactly the kind
+of thing that looks right and is off by the scroll offset, and the offset is
+invisible in a screenshot. Zooming to the centre means the thing you pointed at
+slides out from under the pointer, so you zoom, lose your place, scroll back,
+zoom again.
+
+**One notch is one step.** The factor is constant, not proportional to
+`deltaY`: trackpads emit a continuum of small values and mice emit large ones,
+so a proportional response makes zoom speed depend on the hardware. `deltaMode`
+(line/page vs pixel) is deliberately not used for magnitude for the same
+reason — it would make the same gesture behave differently under a browser
+setting the user never sees.
+
+**Bounds 0.25–5.** PDF.js clamps to 0.1–25, which is wider than useful at both
+ends: one notch at the low end empties the viewport, and past ~5x on a 1280px
+panel a single line of text fills the screen. The clamp is also the last line
+of defence — a non-finite scale returns 1 rather than the ceiling, because
+clamping an already-broken value to the maximum applies the consequence of the
+break.
+
+**Left Ctrl cannot be distinguished.** The request was for the left key
+specifically, and a `WheelEvent` carries only `ctrlKey` — no `code`, no
+`location`. Tracking it through keydown/keyup means guessing at state that can
+be missed (a keyup outside the window leaves the flag stuck), and getting it
+wrong fails silently. So any Ctrl zooms, which is also what every other PDF
+reader does. Cmd is accepted on the same reasoning.
+
+**Plain wheel still scrolls.** `isZoomGesture` returns false without Ctrl, so
+the listener returns before `preventDefault()` — that check is the one that
+keeps the gesture from breaking ordinary scrolling, and it is negative-controlled.
+
+Not covered by tests, and stated rather than implied: the DOM wiring itself.
+The listener, the `origin` computation and the `updateScale` call need a real
+WebView to exercise, and this project has no browser automation (K-13). What is
+tested is everything the wiring delegates to.
+
 ### A-26 — FIXED in 0.6.3: page text extraction depended on scroll position
 
 The panel reported "未能提取到文本（共 N 页）" for a document with text on
@@ -727,3 +771,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-24 | The Zhipu free preset defaulted to a retired model id, and a 401-based probe could not have caught it |
 | A-25 | The composer treated an input method's Enter (committing a candidate) as a send, making it unusable in Chinese |
 | A-26 | Page text was read from the rendered DOM text layer, so extraction depended on scroll position and failed on freshly opened documents |
+| A-27 | Ctrl+wheel zoom, anchored on the cursor. Left/right Ctrl is not distinguishable on a WheelEvent, so any Ctrl zooms |

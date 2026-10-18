@@ -51,6 +51,7 @@ const suites = [
   { name: "eraser policy (A-18)", file: "tests/ai-unit/erase-policy.test.mjs" },
   { name: "reading memory chunking (A-19)", file: "tests/ai-unit/memory.test.mjs" },
   { name: "page text extraction (A-26)", file: "tests/ai-unit/text-extraction.test.mjs" },
+  { name: "ctrl+wheel zoom", file: "tests/ai-unit/wheel-zoom.test.mjs" },
 ];
 
 const results = [];
