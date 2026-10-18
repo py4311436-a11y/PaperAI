@@ -205,6 +205,55 @@ impl From<String> for Content {
 pub struct ChatMessage {
     pub role: String,
     pub content: Content,
+    /// Set on an assistant message that asked to call tools.
+    ///
+    /// Separate from `content` because the protocol treats them separately: the
+    /// model may return text *and* a call, and the arguments are a JSON string,
+    /// not prose to be parsed out of an answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// Set on a `tool` message: which call it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+/// One function call requested by the model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    /// Always `function` today. Kept because the wire format requires it.
+    #[serde(rename = "type", default = "function_kind")]
+    pub kind: String,
+    pub function: FunctionCall,
+}
+
+fn function_kind() -> String {
+    "function".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    /// JSON-encoded arguments, verbatim from the model. Not parsed here: the
+    /// caller validates them against the tool it offered, and a parse failure
+    /// there is a refusal, not a crash.
+    pub arguments: String,
+}
+
+/// A tool offered to the model for one request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDef {
+    #[serde(rename = "type", default = "function_kind")]
+    pub kind: String,
+    pub function: ToolFunction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFunction {
+    pub name: String,
+    pub description: String,
+    /// JSON Schema for the arguments.
+    pub parameters: serde_json::Value,
 }
 
 /// Everything needed to start one streamed completion.
@@ -216,6 +265,10 @@ pub struct ChatRequest {
     /// Optional per-request overrides — kept minimal on purpose.
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// Tools the model may call. Absent means the request is plain chat, which
+    /// is every path except the page-refetch loop.
+    #[serde(default)]
+    pub tools: Option<Vec<ToolDef>>,
 }
 
 /// Inclusive, serialisable mirror of the channel events.
@@ -227,6 +280,12 @@ pub enum AiStreamEvent {
     Completed { finish_reason: Option<String> },
     Cancelled,
     Error { code: String, safe_message: String },
+    /// The model asked to call tools instead of (or as well as) answering.
+    ///
+    /// Terminal: the request is over and the caller decides what to do. Emitted
+    /// as a structured field, never as text in `Delta` — a document that spells
+    /// out a call inside its own body cannot reach this variant.
+    ToolCalls { calls: Vec<ToolCall> },
 }
 
 /// Result of `test_connection`.

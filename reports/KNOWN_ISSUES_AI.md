@@ -207,6 +207,59 @@ and the right behaviour.
 
 ---
 
+### B — 0.7.0: the model can ask for a page, and the app fetches it
+
+The feature the notes were for. With notes standing in for the document, a
+question costs a few hundred tokens — but notes are a summary, so sooner or later
+the model needs the actual page. It can now ask for it.
+
+The loop: the model calls `read_page(page)`, the app renders that page, replies
+with the image as a `tool` message, and asks again. The user sees the question,
+then the answer, with "正在查看第 5 页…" in between.
+
+**Tool calling, not a marker in prose.** The decision from the design note, and
+the reason is forgery: a marker like `[[PAGE:5]]` is just characters, and a
+document that contains those characters would produce the same signal. A
+`tool_calls` field is not reachable from document text at all. The cost is real
+— the request/stream protocol gained `tools`, `tool_calls`, a `tool` role and a new
+terminal event — and it was paid deliberately.
+
+**Only one tool exists, and Rust checks the name too.** `read_page` takes one
+integer and returns one page image. It cannot read the filesystem, fetch a URL, or
+return more than the viewer already displays. The frontend supplies the
+description and schema (it knows the page count); the *name* is checked against a
+fixed allowlist in Rust, because the set of actions must not be decided by
+anything that a document can influence.
+
+**Every rule is a refusal, never a repair.** A page out of range is refused
+rather than clamped: clamping 900 to page 7 would hand the model a page it did
+not ask for and it would answer from it. A fractional page is refused rather than
+rounded. A string `"5"` is refused. Malformed JSON is refused with a message the
+model can act on. Refusals go back as `tool` messages so the model can answer
+from what it has instead of the user getting nothing.
+
+**The cap belongs to the app.** Two pages per question, counted in distinct
+pages fetched — asking twice for page 5 does not buy two refetches. Beyond that
+the user is asked, and a refusal ends the turn with a stated reason naming the
+pages the model wanted. The controller also bounds the loop in rounds, so a
+provider that keeps emitting calls cannot loop forever even if the page budget
+somehow does not bite.
+
+**Every `tool_call` id gets exactly one reply.** The protocol requires it; a
+missing reply makes the request malformed and the provider reports a bad request,
+which looks like a broken model rather than a broken app. There is a test for the
+totality of that mapping.
+
+Pages fetched during an answer are attached to the *question* turn, so a later
+read of the conversation shows why the answer mentions a figure — and a follow-up
+does not pay for them again (A-29's rule, applied to the new path).
+
+**What is not tested, and stated rather than implied:** the rendering, the
+confirmation prompt, and whether a given model actually uses the tool when it
+should. No unit test can answer the last one; it needs a real provider and real
+papers. The rules that *are* testable are, with negative controls that fail
+precisely when a rule is removed.
+
 ### A-36 — 0.6.11: a session created after the provider was chosen could not send
 
 The failure, reproduced exactly: fresh install, first question in `selection`
@@ -1026,3 +1079,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-34 | Markdown tables were never rendered; pipes arrived as literal text |
 | A-35 | A restored turn saved mid-stream made the app permanently busy, so sending was dead from startup. Snapshots were taken after the guard |
 | A-36 | A session created after the provider was chosen had no provider bound, so the first send was refused; `selection` was hardcoded as the default mode |
+| B | 0.7.0: the model can call `read_page` to fetch one page image mid-answer, capped at 2 pages per question; tool calling rather than a text marker, because a document could forge a marker |

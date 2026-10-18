@@ -184,6 +184,9 @@ pub async fn ai_ask_once(
     // A per-call id keeps prompt caching as effective as the chat path's.
     session_id: Some(format!("paperai-notes-{}", p.id)),
     send_session_header: p.sends_session_header,
+    // The notes pipeline never asks for pages; it already has them or it does
+    // not, and a mid-pipeline refetch would multiply its cost silently.
+    tools: None,
   };
 
   {
@@ -262,6 +265,41 @@ pub fn ai_chat_clear(pdf_path: String) -> Result<(), AppError> {
     chat_history::clear_chat(std::path::Path::new(&pdf_path))
 }
 
+/// Tool names the model is allowed to invoke.
+///
+/// A closed list, checked here rather than trusted from the frontend. A tool is
+/// an *action*, not data: if the set of actions could be chosen by a caller, a
+/// document that talked the app into sending something could also talk it into
+/// offering a tool that does more than read a page. The frontend still supplies
+/// the description and schema (it knows the document), but it cannot invent a
+/// name.
+const ALLOWED_TOOLS: &[&str] = &["read_page"];
+
+/// Reject anything outside the allowlist before a request is made.
+///
+/// Returns the tools unchanged when they pass, so the caller can keep using one
+/// value rather than two.
+fn validate_tools(
+    tools: Option<Vec<crate::ai::types::ToolDef>>,
+) -> Result<Option<Vec<crate::ai::types::ToolDef>>, AppError> {
+    let Some(list) = tools else { return Ok(None) };
+    if list.len() > 4 {
+        return Err(AppError::new(
+            codes::AI_BAD_CONFIG,
+            "可提供的工具过多，已拒绝".to_string(),
+        ));
+    }
+    for t in &list {
+        if !ALLOWED_TOOLS.contains(&t.function.name.as_str()) {
+            return Err(AppError::new(
+                codes::AI_BAD_CONFIG,
+                format!("不支持的工具：{}", t.function.name),
+            ));
+        }
+    }
+    Ok(if list.is_empty() { None } else { Some(list) })
+}
+
 /// Start a streamed completion.
 ///
 /// Returns as soon as the task is spawned; the answer arrives on `sink` tagged
@@ -279,6 +317,11 @@ pub async fn ai_start_chat(
     // `AiProfile::sends_session_header`). It is a random conversation id, not a
     // credential, and is never logged.
     session_id: Option<String>,
+    // Tools the model may call, or None for plain chat. Validated here rather
+    // than trusted: only a fixed allowlist is accepted, because a tool the model
+    // can invoke is an action, and the set of actions must not be decided by a
+    // caller that was compromised by document text.
+    tools: Option<Vec<crate::ai::types::ToolDef>>,
     sink: Channel<AiStreamEvent>,
 ) -> Result<(), AppError> {
     if request_id.trim().is_empty() {
@@ -293,6 +336,7 @@ pub async fn ai_start_chat(
         return Err(AppError::new(codes::AI_BAD_CONFIG, "消息内容不能为空"));
     }
 
+    let tools = validate_tools(tools)?;
     let profile = settings::get(&profile_id)?;
     // Fail fast and cheaply when there is no key, rather than opening a socket
     // to learn it from a 401.
@@ -311,6 +355,7 @@ pub async fn ai_start_chat(
         temperature,
         session_id,
         send_session_header: profile.sends_session_header,
+        tools,
     };
 
     let fut = provider.clone().start_chat(call, sink, cancel);

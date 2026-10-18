@@ -36,6 +36,24 @@ pub struct Chunk {
     pub error_message: Option<String>,
     /// True when this chunk carried no choices at all (usage-only tail).
     pub usage_only: bool,
+    /// Tool-call fragments carried by this chunk.
+    ///
+    /// A fragment, not a finished call: the protocol streams `id`, `name` and
+    /// `arguments` separately, and `arguments` arrives as a series of string
+    /// pieces that only form valid JSON once concatenated. Nothing here decides
+    /// what a call means — that is the accumulator's job.
+    pub tool_calls: Vec<ToolCallDelta>,
+}
+
+/// One `delta.tool_calls[i]` fragment, as it arrives.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ToolCallDelta {
+    /// Position in the assistant message's array. The only stable identifier
+    /// while streaming: `id` is itself a fragment on the first chunk.
+    pub index: usize,
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -60,6 +78,26 @@ struct RawChoice {
 struct RawDelta {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<RawToolCall>>,
+}
+
+#[derive(Deserialize)]
+struct RawToolCall {
+    #[serde(default)]
+    index: Option<usize>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<RawFunctionCall>,
+}
+
+#[derive(Deserialize)]
+struct RawFunctionCall {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +265,18 @@ fn convert(raw: RawChunk) -> Chunk {
                             });
                         }
                     }
+                    for (pos, raw) in d.tool_calls.unwrap_or_default().into_iter().enumerate() {
+                        c.tool_calls.push(ToolCallDelta {
+                            // Providers normally send `index`; a provider that
+                            // omits it gets the position in this chunk, which is
+                            // right for the single-call case everything here
+                            // produces.
+                            index: raw.index.unwrap_or(pos),
+                            id: raw.id,
+                            name: raw.function.as_ref().and_then(|f| f.name.clone()),
+                            arguments: raw.function.as_ref().and_then(|f| f.arguments.clone()),
+                        });
+                    }
                 }
                 if ch.finish_reason.is_some() {
                     c.finish_reason = ch.finish_reason;
@@ -235,6 +285,80 @@ fn convert(raw: RawChunk) -> Chunk {
         }
     }
     c
+}
+
+/// Accumulates streamed tool-call fragments into finished calls.
+///
+/// The protocol sends `id`, `name` and `arguments` as fragments, and
+/// `arguments` in particular arrives as a series of string pieces that only
+/// become valid JSON once joined. Keying by `index` rather than by `id` is
+/// deliberate: `id` is itself a fragment on the first chunk, so it is missing
+/// exactly when the call is first created.
+#[derive(Debug, Default)]
+pub struct ToolCallAccumulator {
+    slots: Vec<Option<PendingCall>>,
+}
+
+#[derive(Debug, Default)]
+struct PendingCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl ToolCallAccumulator {
+    pub fn new() -> Self {
+        Self { slots: Vec::new() }
+    }
+
+    /// Feed one chunk's fragments. Order within a chunk is preserved.
+    pub fn push(&mut self, deltas: &[ToolCallDelta]) {
+        for d in deltas {
+            while self.slots.len() <= d.index {
+                self.slots.push(None);
+            }
+            let slot = self.slots[d.index].get_or_insert_with(PendingCall::default);
+            if let Some(id) = &d.id {
+                slot.id.push_str(id);
+            }
+            if let Some(name) = &d.name {
+                slot.name.push_str(name);
+            }
+            if let Some(args) = &d.arguments {
+                slot.arguments.push_str(args);
+            }
+        }
+    }
+
+    /// True when at least one call arrived.
+    pub fn is_empty(&self) -> bool {
+        self.slots.iter().all(|s| s.is_none())
+    }
+
+    /// Finish the calls. A call with no name is dropped: it cannot be executed
+    /// and forwarding it would make the caller guess.
+    pub fn finish(&self) -> Vec<super::types::ToolCall> {
+        self.slots
+            .iter()
+            .flatten()
+            .filter(|p| !p.name.trim().is_empty())
+            .enumerate()
+            .map(|(i, p)| super::types::ToolCall {
+                // A provider that never sent an id gets a synthetic one. The
+                // caller needs *something* to correlate its `tool` reply with.
+                id: if p.id.trim().is_empty() {
+                    format!("call_{i}")
+                } else {
+                    p.id.clone()
+                },
+                kind: "function".to_string(),
+                function: super::types::FunctionCall {
+                    name: p.name.clone(),
+                    arguments: p.arguments.clone(),
+                },
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -376,5 +500,123 @@ mod tests {
             b"data: {\"choices\":[{\"delta\":{\"content\":\"one\"}},{\"delta\":{\"content\":\"two\"}}]}\n\n",
         );
         assert_eq!(texts(&evs), "onetwo");
+    }
+}
+
+#[cfg(test)]
+mod tool_call_tests {
+    use super::*;
+
+    fn delta(index: usize, id: Option<&str>, name: Option<&str>, args: Option<&str>) -> ToolCallDelta {
+        ToolCallDelta {
+            index,
+            id: id.map(str::to_string),
+            name: name.map(str::to_string),
+            arguments: args.map(str::to_string),
+        }
+    }
+
+    /// The protocol streams a call in pieces, and `arguments` is the piece that
+    /// matters: it only becomes JSON once every fragment is joined, in order.
+    #[test]
+    fn fragments_are_joined_in_order() {
+        let mut acc = ToolCallAccumulator::new();
+        acc.push(&[delta(0, Some("call_a"), Some("read"), None)]);
+        acc.push(&[delta(0, None, Some("_page"), None)]);
+        acc.push(&[delta(0, None, None, Some("{\"pa"))]);
+        acc.push(&[delta(0, None, None, Some("ge\": 5}"))]);
+
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_a");
+        assert_eq!(calls[0].function.name, "read_page", "name is streamed in pieces too");
+        assert_eq!(calls[0].function.arguments, "{\"page\": 5}");
+    }
+
+    /// Index, not id, identifies a slot: the id arrives on the first fragment
+    /// while the slot is being created, so keying on it would lose the call.
+    #[test]
+    fn slots_are_keyed_by_index_not_id() {
+        let mut acc = ToolCallAccumulator::new();
+        acc.push(&[delta(0, Some("a"), Some("read_page"), Some("{}"))]);
+        acc.push(&[delta(1, Some("b"), Some("read_page"), Some("{}"))]);
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "a");
+        assert_eq!(calls[1].id, "b");
+    }
+
+    /// Two fragments for the same slot arriving in one chunk must merge, not
+    /// overwrite — the whole argument string can arrive split across one batch.
+    #[test]
+    fn several_fragments_in_one_chunk_merge() {
+        let mut acc = ToolCallAccumulator::new();
+        acc.push(&[
+            delta(0, Some("c"), Some("read_page"), Some("{\"page\":")),
+            delta(0, None, None, Some("7}")),
+        ]);
+        assert_eq!(acc.finish()[0].function.arguments, "{\"page\":7}");
+    }
+
+    #[test]
+    fn nothing_arrives_means_no_calls() {
+        let acc = ToolCallAccumulator::new();
+        assert!(acc.is_empty());
+        assert!(acc.finish().is_empty());
+    }
+
+    /// A nameless call cannot be executed. Dropping it is the only honest
+    /// option: passing it on would make the caller guess what to run.
+    #[test]
+    fn a_call_without_a_name_is_dropped() {
+        let mut acc = ToolCallAccumulator::new();
+        acc.push(&[delta(0, Some("x"), None, Some("{}"))]);
+        assert!(acc.finish().is_empty());
+    }
+
+    /// A provider that never sends an id still needs one, so the `tool` reply
+    /// can be correlated with the call.
+    #[test]
+    fn a_missing_id_gets_a_synthetic_one() {
+        let mut acc = ToolCallAccumulator::new();
+        acc.push(&[delta(0, None, Some("read_page"), Some("{}"))]);
+        let calls = acc.finish();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_0");
+    }
+
+    /// The parser must surface `delta.tool_calls` and leave ordinary content
+    /// untouched — this is the same parser the plain-chat path uses.
+    #[test]
+    fn the_parser_reports_tool_call_deltas() {
+        let mut p = SseParser::new();
+        let evs = p.push(
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\
+              \"function\":{\"name\":\"read_page\",\"arguments\":\"{\\\"page\\\":3}\"}}]}}]}\n\n",
+        );
+        let mut found = false;
+        for e in evs {
+            if let SseEvent::Chunk(c) = e {
+                if !c.tool_calls.is_empty() {
+                    found = true;
+                    assert_eq!(c.tool_calls[0].index, 0);
+                    assert_eq!(c.tool_calls[0].name.as_deref(), Some("read_page"));
+                }
+            }
+        }
+        assert!(found, "the parser dropped the tool_call delta");
+    }
+
+    /// Plain content must not grow a tool-call list it never had.
+    #[test]
+    fn ordinary_content_has_no_tool_calls() {
+        let mut p = SseParser::new();
+        let evs = p.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n");
+        for e in evs {
+            if let SseEvent::Chunk(c) = e {
+                assert!(c.tool_calls.is_empty());
+                assert_eq!(c.content.as_deref(), Some("hi"));
+            }
+        }
     }
 }

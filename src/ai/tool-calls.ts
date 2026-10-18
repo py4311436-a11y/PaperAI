@@ -1,0 +1,131 @@
+/**
+ * Deciding what to do with a model's tool calls.
+ *
+ * Pure, and separated from the app for one reason: this is the only place a
+ * model can make the app *do* something, so every rule here needs a test that
+ * fails when the rule is removed. The rendering, the progress UI and the
+ * approval prompt stay in `main.ts`; what is decided stays here.
+ *
+ * The rules, and why each is a refusal rather than a repair:
+ *
+ *  - **Unknown names are refused.** Only `read_page` exists, and Rust checks the
+ *    same allowlist. A tool is an action; a name that arrived from somewhere
+ *    else must not become one.
+ *  - **The page must be an integer in range.** Clamping a request for page 900
+ *    of a 7-page paper would return page 7 and the model would answer from it
+ *    believing it had page 900. A refusal lets it say what it could not read.
+ *  - **Each call gets exactly one reply.** The protocol requires it, and a
+ *    missing reply makes the request malformed — which the provider reports as a
+ *    bad request, looking like a broken model rather than a broken app.
+ *  - **The budget is counted in distinct pages fetched, not in calls.** Otherwise
+ *    asking twice for page 5 buys two refetches.
+ */
+
+import type { ToolCall } from "./types";
+
+/** Refetch budget per question. The user's number. */
+export const MAX_REFETCH_PAGES = 2;
+
+export interface ToolPlan {
+  /** Pages to fetch, in the order the model asked, de-duplicated. */
+  fetch: number[];
+  /** Replies that need no work: refusals and already-paid-for pages. */
+  replies: { id: string; reason: string }[];
+  /** True when `fetch` would exceed the budget. */
+  overBudget: boolean;
+  /** Pages in `fetch` that are not already fetched. */
+  fresh: number[];
+}
+
+/**
+ * Read the `page` argument, or say why it is unusable.
+ *
+ * Returns a number only for a JSON object with an integer `page`. A string
+ * `"3"`, a float `3.7` and a missing field are all malformed calls, and each gets
+ * a message the model can act on.
+ */
+function readPageArg(args: string): { page: number } | { error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(args || "{}");
+  } catch {
+    return { error: '参数不是有效的 JSON。请用 {"page": 页码} 重新调用。' };
+  }
+  const page = (parsed as { page?: unknown } | null)?.page;
+  if (typeof page !== "number" || !Number.isInteger(page)) {
+    return { error: `页码必须是整数，收到的是 ${JSON.stringify(page)}。` };
+  }
+  return { page };
+}
+
+/**
+ * Decide which pages to fetch and what to tell the model about the rest.
+ *
+ * `alreadyFetched` is the set of pages already pulled in for this question, so a
+ * second round cannot charge the same page twice.
+ */
+export function planToolCalls(
+  calls: ToolCall[],
+  pageCount: number,
+  alreadyFetched: ReadonlySet<number>
+): ToolPlan {
+  const fetch: number[] = [];
+  const replies: { id: string; reason: string }[] = [];
+
+  for (const call of calls) {
+    const name = call.function?.name ?? "";
+    if (name !== "read_page") {
+      replies.push({ id: call.id, reason: `不支持的工具：${name}。只能调用 read_page。` });
+      continue;
+    }
+    const arg = readPageArg(call.function?.arguments ?? "");
+    if ("error" in arg) {
+      replies.push({ id: call.id, reason: arg.error });
+      continue;
+    }
+    if (arg.page < 1 || arg.page > pageCount) {
+      replies.push({
+        id: call.id,
+        reason: `页码 ${arg.page} 超出范围（本文件共 ${pageCount} 页）。`,
+      });
+      continue;
+    }
+    if (alreadyFetched.has(arg.page)) {
+      // Already in the request from an earlier round. Saying so is better than
+      // sending the same image twice: the model stops asking and uses it.
+      replies.push({ id: call.id, reason: `第 ${arg.page} 页的图像本次已经发送过了。` });
+      continue;
+    }
+    if (!fetch.includes(arg.page)) fetch.push(arg.page);
+  }
+
+  const fresh = fetch.filter((p) => !alreadyFetched.has(p));
+  return {
+    fetch,
+    replies,
+    fresh,
+    overBudget: alreadyFetched.size + fresh.length > MAX_REFETCH_PAGES,
+  };
+}
+
+/**
+ * The reply for a call that was answered with an image.
+ *
+ * Built here so the shape — an image inside a `tool` message — is tested in one
+ * place rather than assembled by hand at the call site.
+ */
+export function imageToolReply(callId: string, page: number, dataUrl: string) {
+  return {
+    role: "tool" as const,
+    tool_call_id: callId,
+    content: [
+      { type: "text" as const, text: `第 ${page} 页的图像如下。` },
+      { type: "image_url" as const, image_url: { url: dataUrl } },
+    ],
+  };
+}
+
+/** The reply for a call that was refused. */
+export function refusalReply(callId: string, reason: string) {
+  return { role: "tool" as const, tool_call_id: callId, content: reason };
+}

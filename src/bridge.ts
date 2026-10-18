@@ -163,6 +163,7 @@ import type {
   MemoryFile,
   ModelOption,
   ProfileStatus,
+  ToolDef,
 } from "./ai/types";
 import type { StoredChat } from "./ai/chat-history.js";
 import { Channel } from "@tauri-apps/api/core";
@@ -315,7 +316,13 @@ export async function aiStartChat(
    * for profiles that ask for it, and ignores it otherwise. A random
    * conversation id, never a credential.
    */
-  sessionId?: string
+  sessionId?: string,
+  /**
+   * Tools the model may call. `null` for plain chat — the Rust side validates
+   * the names against its own allowlist, so this cannot widen what the app can
+   * be made to do.
+   */
+  tools?: ToolDef[] | null
 ): Promise<void> {
   const channel = new Channel<AiStreamEvent>();
   channel.onmessage = onEvent;
@@ -325,6 +332,7 @@ export async function aiStartChat(
     messages,
     temperature,
     sessionId: sessionId ?? null,
+    tools: tools ?? null,
     sink: channel,
   });
 }

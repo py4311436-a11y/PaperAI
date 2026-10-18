@@ -86,6 +86,9 @@ pub struct ChatCall {
     pub session_id: Option<String>,
     /// See `AiProfile::sends_session_header`.
     pub send_session_header: bool,
+    /// Tools offered to the model for this call. `None` keeps the request body
+    /// byte-identical to what earlier releases sent.
+    pub tools: Option<Vec<crate::ai::types::ToolDef>>,
 }
 
 /// Attach the OpenCode session header when the profile asks for it.
@@ -237,7 +240,13 @@ pub async fn run_chat_with_deadlines<S>(
         Err(e) => return fail(sink, e),
     };
 
-    let payload = build_body(&req.model, &req.messages, req.temperature, true);
+    let payload = build_body(
+        &req.model,
+        &req.messages,
+        req.temperature,
+        true,
+        req.tools.as_deref(),
+    );
 
     // A-16: NO `.timeout(...)` on this request.
     //
@@ -287,6 +296,7 @@ pub async fn run_chat_with_deadlines<S>(
     let mut parser = SseParser::new();
     let mut body = resp.bytes_stream();
     let mut saw_any = false;
+    let mut calls = crate::ai::stream::ToolCallAccumulator::new();
 
     // Stall deadline: measured from the moment the request was accepted, reset
     // on every chunk so it acts as an idle timeout too. This — not a total
@@ -362,17 +372,18 @@ pub async fn run_chat_with_deadlines<S>(
                 match item {
                     None => {
                         for ev in parser.finish() {
-                            if !apply(ev, &mut saw_any, sink) {
+                            if !apply(ev, &mut saw_any, &mut calls, sink) {
                                 return;
                             }
                         }
                         if parser.is_finished() {
                             return;
                         }
-                        if saw_any {
+                        if saw_any || !calls.is_empty() {
                             // Many gateways omit [DONE]; a clean close after
-                            // content is a successful completion.
-                            sink(AiStreamEvent::Completed { finish_reason: None });
+                            // content — or after a tool call — is a successful
+                            // completion.
+                            sink(terminal(&calls, None));
                         } else {
                             sink(AiStreamEvent::Error {
                                 code: codes::AI_BAD_STREAM.to_string(),
@@ -387,7 +398,7 @@ pub async fn run_chat_with_deadlines<S>(
                     Some(Ok(bytes)) => {
                         deadline = tokio::time::Instant::now() + stall_timeout;
                         for ev in parser.push(&bytes) {
-                            if !apply(ev, &mut saw_any, sink) {
+                            if !apply(ev, &mut saw_any, &mut calls, sink) {
                                 return;
                             }
                         }
@@ -510,13 +521,19 @@ fn build_body(
     messages: &[ChatMessage],
     temperature: Option<f32>,
     stream: bool,
+    tools: Option<&[crate::ai::types::ToolDef]>,
 ) -> serde_json::Value {
     let msgs: Vec<MsgOut> = messages
         .iter()
-        .filter(|m| matches!(m.role.as_str(), "system" | "user" | "assistant"))
+        // `tool` is now a legitimate role: it carries the result of a call the
+        // model made. Dropping it here would leave the model asked to continue
+        // with no answer to its own question.
+        .filter(|m| matches!(m.role.as_str(), "system" | "user" | "assistant" | "tool"))
         .map(|m| MsgOut {
             role: m.role.clone(),
             content: content_value(&m.content),
+            tool_calls: m.tool_calls.clone(),
+            tool_call_id: m.tool_call_id.clone(),
         })
         .collect();
 
@@ -527,6 +544,13 @@ fn build_body(
     if let Some(t) = temperature {
         obj.insert("temperature".into(), serde_json::json!(t));
     }
+    // Only when offered. A request with no tools must stay byte-identical to
+    // what earlier releases sent, so nothing changes for the ordinary path.
+    if let Some(list) = tools {
+        if !list.is_empty() {
+            obj.insert("tools".into(), serde_json::to_value(list).unwrap_or_default());
+        }
+    }
     serde_json::Value::Object(obj)
 }
 
@@ -534,14 +558,23 @@ fn build_body(
 struct MsgOut {
     role: String,
     content: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<crate::ai::types::ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
 }
 
 /// Apply one parsed SSE event to the sink.
 /// Returns `false` when the stream is over (a terminal event was emitted).
-fn apply<S: Fn(AiStreamEvent)>(ev: SseEvent, saw_any: &mut bool, sink: &S) -> bool {
+fn apply<S: Fn(AiStreamEvent)>(
+    ev: SseEvent,
+    saw_any: &mut bool,
+    calls: &mut crate::ai::stream::ToolCallAccumulator,
+    sink: &S,
+) -> bool {
     match ev {
         SseEvent::Done => {
-            sink(AiStreamEvent::Completed { finish_reason: None });
+            sink(terminal(calls, None));
             false
         }
         SseEvent::Chunk(c) => {
@@ -552,6 +585,10 @@ fn apply<S: Fn(AiStreamEvent)>(ev: SseEvent, saw_any: &mut bool, sink: &S) -> bo
                 });
                 return false;
             }
+            // Accumulate before deciding anything: the fragments of a call can
+            // arrive after the content and before the finish reason, and the
+            // decision below depends on all of them being in.
+            calls.push(&c.tool_calls);
             if let Some(t) = c.content {
                 if !t.is_empty() {
                     *saw_any = true;
@@ -559,12 +596,27 @@ fn apply<S: Fn(AiStreamEvent)>(ev: SseEvent, saw_any: &mut bool, sink: &S) -> bo
                 }
             }
             if let Some(fr) = c.finish_reason {
-                sink(AiStreamEvent::Completed { finish_reason: Some(fr) });
+                sink(terminal(calls, Some(fr)));
                 return false;
             }
             true
         }
     }
+}
+
+/// The event that ends a stream, chosen by whether the model asked for a tool.
+///
+/// A call and a finished answer are mutually exclusive as *terminal* events: the
+/// caller either has an answer to show or a request to fulfil. Emitting both
+/// would have it display an empty answer and then silently continue.
+fn terminal(
+    calls: &crate::ai::stream::ToolCallAccumulator,
+    finish_reason: Option<String>,
+) -> AiStreamEvent {
+    if calls.is_empty() {
+        return AiStreamEvent::Completed { finish_reason };
+    }
+    AiStreamEvent::ToolCalls { calls: calls.finish() }
 }
 
 /// One-shot, non-streaming connection probe.
@@ -787,31 +839,91 @@ mod tests {
         }
     }
 
+    /// A plain chat request must stay minimal.
+    ///
+    /// It previously also asserted that a `tool` message was dropped. That is no
+    /// longer true and must not be: the page-refetch loop sends a `tool` message
+    /// carrying the result of the call the model just made, and dropping it would
+    /// ask the model to continue with no answer to its own question. The role is
+    /// now accepted; unknown roles are still filtered.
     #[test]
-    fn body_is_minimal_and_lowercase_roles_only() {
+    fn body_is_minimal_for_plain_chat() {
+        let msg = |role: &str, content: &str| ChatMessage {
+            role: role.into(),
+            content: text(content),
+            tool_calls: None,
+            tool_call_id: None,
+        };
         let msgs = vec![
-            ChatMessage { role: "system".into(), content: text("s") },
-            ChatMessage { role: "user".into(), content: text("u") },
-            ChatMessage { role: "tool".into(), content: text("should be dropped") },
+            msg("system", "s"),
+            msg("user", "u"),
+            msg("tool", "result of the call"),
+            msg("assistant-reasoning", "not a role the API accepts"),
         ];
-        let b = build_body("m", &msgs, None, true);
+        let b = build_body("m", &msgs, None, true, None);
         let obj = b.as_object().unwrap();
-        assert_eq!(obj.len(), 3, "unexpected extra fields: {obj:?}");
+        assert_eq!(obj.len(), 3, "no tools key without tools: {obj:?}");
         assert_eq!(obj["model"], "m");
         assert_eq!(obj["stream"], true);
-        assert_eq!(obj["messages"].as_array().unwrap().len(), 2);
+        let sent = obj["messages"].as_array().unwrap();
+        assert_eq!(sent.len(), 3, "tool survives, the bogus role does not: {sent:?}");
+        assert_eq!(sent[2]["role"], "tool");
         for banned in ["tools", "response_format", "thinking", "reasoning_effort", "top_p"] {
             assert!(!obj.contains_key(banned), "{banned} must not be sent");
         }
     }
 
+    /// Tools are sent only when offered, and in the protocol's shape.
+    #[test]
+    fn tools_are_sent_only_when_offered() {
+        let def = crate::ai::types::ToolDef {
+            kind: "function".into(),
+            function: crate::ai::types::ToolFunction {
+                name: "read_page".into(),
+                description: "read one page".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+        };
+        let body = build_body("m", &[], None, true, Some(&[def]));
+        let tools = &body["tools"];
+        assert_eq!(tools.as_array().unwrap().len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "read_page");
+    }
+
+    /// An assistant message that asked for a call must carry the call back, or
+    /// the follow-up request has no memory of what it asked.
+    #[test]
+    fn an_assistant_tool_call_is_echoed_back() {
+        let mut m = ChatMessage {
+            role: "assistant".into(),
+            content: Content::Text(String::new()),
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        m.tool_calls = Some(vec![crate::ai::types::ToolCall {
+            id: "call_1".into(),
+            kind: "function".into(),
+            function: crate::ai::types::FunctionCall {
+                name: "read_page".into(),
+                arguments: "{\"page\":5}".into(),
+            },
+        }]);
+        let body = build_body("m", &[m], None, true, None);
+        let sent = &body["messages"][0];
+        assert_eq!(sent["tool_calls"][0]["function"]["name"], "read_page");
+        assert_eq!(sent["tool_calls"][0]["function"]["arguments"], "{\"page\":5}");
+    }
+
     #[test]
     fn temperature_only_when_requested() {
-        let msgs = vec![ChatMessage { role: "user".into(), content: text("u") }];
-        assert!(!build_body("m", &msgs, None, true).as_object().unwrap().contains_key("temperature"));
+        let msgs = vec![ChatMessage { role: "user".into(), content: text("u"),
+                tool_calls: None, tool_call_id: None,
+            }];
+        assert!(!build_body("m", &msgs, None, true, None).as_object().unwrap().contains_key("temperature"));
         // f32 -> Value goes through f64, so compare approximately rather than
         // against the literal 0.3.
-        let t = build_body("m", &msgs, Some(0.3), true)["temperature"]
+        let t = build_body("m", &msgs, Some(0.3), true, None)["temperature"]
             .as_f64()
             .expect("temperature is a number");
         assert!((t - 0.3).abs() < 1e-6, "got {t}");
@@ -826,8 +938,10 @@ mod tests {
     /// beyond a slower, more expensive answer.
     #[test]
     fn text_only_content_stays_a_bare_string() {
-        let msgs = vec![ChatMessage { role: "user".into(), content: text("论文全文") }];
-        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+        let msgs = vec![ChatMessage { role: "user".into(), content: text("论文全文"),
+                tool_calls: None, tool_call_id: None,
+            }];
+        let c = &build_body("m", &msgs, None, true, None)["messages"][0]["content"];
         assert!(c.is_string(), "text must stay a string, got {c}");
         assert_eq!(c.as_str().unwrap(), "论文全文");
     }
@@ -845,8 +959,9 @@ mod tests {
                 ContentPart::Text { text: "论文全文".into() },
                 ContentPart::Text { text: "第 3 页".into() },
             ]),
-        }];
-        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+                tool_calls: None, tool_call_id: None,
+            }];
+        let c = &build_body("m", &msgs, None, true, None)["messages"][0]["content"];
         assert!(c.is_string(), "no images means a string, got {c}");
         assert_eq!(c.as_str().unwrap(), "论文全文\n第 3 页");
     }
@@ -860,8 +975,9 @@ mod tests {
                 ContentPart::Text { text: "这条曲线为什么断开？".into() },
                 img("data:image/png;base64,AAAA"),
             ]),
-        }];
-        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+                tool_calls: None, tool_call_id: None,
+            }];
+        let c = &build_body("m", &msgs, None, true, None)["messages"][0]["content"];
         let arr = c.as_array().expect("mixed content must be an array");
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["type"], "text");
@@ -877,9 +993,10 @@ mod tests {
         let msgs = vec![ChatMessage {
             role: "user".into(),
             content: Content::Parts(vec![img("data:image/png;base64,AAAA")]),
-        }];
+                tool_calls: None, tool_call_id: None,
+            }];
         assert!(!msgs[0].content.is_empty(), "an image is content");
-        let c = &build_body("m", &msgs, None, true)["messages"][0]["content"];
+        let c = &build_body("m", &msgs, None, true, None)["messages"][0]["content"];
         assert_eq!(c.as_array().unwrap().len(), 1);
     }
 
@@ -890,8 +1007,9 @@ mod tests {
         let msgs = vec![ChatMessage {
             role: "user".into(),
             content: Content::Parts(vec![img("data:image/png;base64,AAAA")]),
-        }];
-        let part = &build_body("m", &msgs, None, true)["messages"][0]["content"][0];
+                tool_calls: None, tool_call_id: None,
+            }];
+        let part = &build_body("m", &msgs, None, true, None)["messages"][0]["content"][0];
         assert!(part["image_url"].get("detail").is_none(), "got {part}");
     }
 
@@ -903,7 +1021,8 @@ mod tests {
         let msgs = vec![ChatMessage {
             role: "user".into(),
             content: Content::Parts(vec![img("http://example.com/a.png")]),
-        }];
+                tool_calls: None, tool_call_id: None,
+            }];
         let e = validate_images(&msgs).unwrap_err();
         assert_eq!(e.code, codes::AI_BAD_CONFIG);
     }
@@ -916,7 +1035,8 @@ mod tests {
                 img("https://example.com/a.png"),
                 img("data:image/png;base64,AAAA"),
             ]),
-        }];
+                tool_calls: None, tool_call_id: None,
+            }];
         assert!(validate_images(&msgs).is_ok());
     }
 
@@ -929,7 +1049,8 @@ mod tests {
         let msgs = vec![ChatMessage {
             role: "user".into(),
             content: Content::Parts(vec![img(&big)]),
-        }];
+                tool_calls: None, tool_call_id: None,
+            }];
         let e = validate_images(&msgs).unwrap_err();
         assert_eq!(e.code, codes::AI_BAD_CONFIG);
     }
@@ -939,17 +1060,22 @@ mod tests {
     #[test]
     fn document_message_is_unchanged_by_an_image_question() {
         let msgs = vec![
-            ChatMessage { role: "system".into(), content: text("sys") },
-            ChatMessage { role: "user".into(), content: text("<document_context>论文</document_context>") },
+            ChatMessage { role: "system".into(), content: text("sys"),
+                tool_calls: None, tool_call_id: None,
+            },
+            ChatMessage { role: "user".into(), content: text("<document_context>论文</document_context>"),
+                tool_calls: None, tool_call_id: None,
+            },
             ChatMessage {
                 role: "user".into(),
                 content: Content::Parts(vec![
                     ContentPart::Text { text: "这是什么图？".into() },
                     img("data:image/png;base64,AAAA"),
                 ]),
+                tool_calls: None, tool_call_id: None,
             },
         ];
-        let b = build_body("m", &msgs, None, true);
+        let b = build_body("m", &msgs, None, true, None);
         let arr = b["messages"].as_array().unwrap();
         assert!(arr[1]["content"].is_string(), "the document must stay a string");
         assert!(arr[2]["content"].is_array(), "the question carries the image");

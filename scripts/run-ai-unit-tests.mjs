@@ -54,6 +54,7 @@ const suites = [
   { name: "ctrl+wheel zoom", file: "tests/ai-unit/wheel-zoom.test.mjs" },
   { name: "whole-page images (A-28)", file: "tests/ai-unit/whole-page-images.test.mjs" },
   { name: "chat history store (A-31)", file: "tests/ai-unit/chat-history.test.mjs" },
+  { name: "tool call planning (B)", file: "tests/ai-unit/tool-calls.test.mjs" },
 ];
 
 const results = [];

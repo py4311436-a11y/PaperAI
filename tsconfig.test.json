@@ -32,6 +32,7 @@
     "src/tools/erase-policy.ts",
     "src/pdf/text-compose.ts",
     "src/pdf/wheel-zoom.ts",
+    "src/ai/tool-calls.ts",
     "tests/ai-unit/run.ts"
   ]
 }

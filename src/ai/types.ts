@@ -119,7 +119,7 @@ export interface ImageAttachment {
 }
 
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   /**
    * Plain text, or a block array when the message carries images.
    *
@@ -129,6 +129,10 @@ export interface ChatMessage {
    * so the invariant does not depend on this side remembering.
    */
   content: string | ContentPart[];
+  /** Set on an assistant message that asked to call tools. */
+  tool_calls?: ToolCall[];
+  /** Set on a `tool` message: which call it answers. */
+  tool_call_id?: string;
 }
 
 export type AiStreamEvent =
@@ -136,7 +140,37 @@ export type AiStreamEvent =
   | { type: "delta"; text: string }
   | { type: "completed"; finish_reason: string | null }
   | { type: "cancelled" }
-  | { type: "error"; code: string; safe_message: string };
+  | { type: "error"; code: string; safe_message: string }
+  /**
+   * The model asked to call a tool instead of answering.
+   *
+   * Terminal, and mutually exclusive with `completed`. Sent as a structured
+   * field, never as text inside `delta` — that is the whole reason the refetch
+   * path uses tool calling: a document cannot forge a field it has no access to,
+   * while a marker in prose is just characters the paper could also contain.
+   */
+  | { type: "tool_calls"; calls: ToolCall[] };
+
+/** One function call the model requested. */
+export interface ToolCall {
+  id: string;
+  type: string;
+  function: {
+    name: string;
+    /** JSON-encoded, exactly as the model produced it. */
+    arguments: string;
+  };
+}
+
+/** A tool offered to the model for one request. */
+export interface ToolDef {
+  type: string;
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
 
 /**
  * Context modes. `none` is the only one that sends no document text.

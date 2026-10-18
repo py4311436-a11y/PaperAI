@@ -42,6 +42,14 @@ import {
   type PageText,
 } from "./ai/memory";
 import { fromStoredChat, isTerminalPhase, type StoredChat } from "./ai/chat-history.js";
+import type { ToolOutcome } from "./ai/chat-controller";
+import type { ToolCall, ToolDef } from "./ai/types";
+import {
+  MAX_REFETCH_PAGES,
+  imageToolReply,
+  planToolCalls,
+  refusalReply,
+} from "./ai/tool-calls";
 import {
   captureSelection,
   installSelectionTracking,
@@ -191,8 +199,8 @@ const panel = new ChatPanel({
 });
 
 const chat = new ChatController({
-  startChat: (id, profileId, messages, onEvent, temperature, sessionId) =>
-    bridge.aiStartChat(id, profileId, messages, onEvent, temperature, sessionId),
+  startChat: (id, profileId, messages, onEvent, temperature, sessionId, tools) =>
+    bridge.aiStartChat(id, profileId, messages, onEvent, temperature, sessionId, tools),
   cancelChat: (id) => bridge.aiCancelChat(id),
   // Read lazily: the choice is made before any document is open, and a session
   // created later must inherit it.
@@ -405,6 +413,141 @@ let chatSaveTimer: ReturnType<typeof setTimeout> | null = null;
  * a debounce that fired mid-stream would store a truncated answer, which reads
  * later as the model having trailed off for no reason.
  */
+/**
+ * The one tool the app offers: read a page of the open document.
+ *
+ * Deliberately narrow. It takes one page number and returns that page's image;
+ * it cannot read the filesystem, call a URL, or return more than the viewer is
+ * already showing. A tool is an action the model can take, so the set of actions
+ * has to be small enough to reason about — and the name is checked again in Rust
+ * against its own allowlist.
+ */
+function readPageTool(pageCount: number): ToolDef {
+  return {
+    type: "function",
+    function: {
+      name: "read_page",
+      description:
+        `读取当前论文某一页的图像。只有在笔记或已提供的内容不足以回答时才调用；` +
+        `一次只取一页，需要多页就分多次调用。本文档共 ${pageCount} 页。`,
+      parameters: {
+        type: "object",
+        properties: {
+          page: {
+            type: "integer",
+            description: `页码，从 1 开始，最大 ${pageCount}`,
+            minimum: 1,
+            maximum: pageCount,
+          },
+        },
+        required: ["page"],
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
+/**
+ * Fulfil the model's page requests.
+ *
+ * Every decision here is a refusal or a cap, because this is the one place a
+ * model can make the app do something:
+ *
+ *  - only `read_page` is honoured; anything else is refused by name
+ *  - the page must be an integer inside the document, or it is refused rather
+ *    than clamped — a clamp would hand back the wrong page and the model would
+ *    answer from it
+ *  - at most `MAX_REFETCH_PAGES` distinct pages per question
+ *  - beyond that the user is asked, and a "no" ends the turn with a reason
+ *
+ * Refusals go back to the model as a `tool` message rather than as an error: it
+ * can then answer from what it has, which is better than the user getting
+ * nothing because the model asked for something impossible.
+ */
+async function fulfilToolCalls(
+  calls: ToolCall[],
+  pageCount: number,
+  alreadyFetched: Set<number>
+): Promise<ToolOutcome> {
+  // Every rule about *what may be fetched* lives in `planToolCalls`, which is
+  // pure and tested. This function only does the parts that need the app: a
+  // confirmation, a render, a progress line.
+  const plan = planToolCalls(calls, pageCount, alreadyFetched);
+  const replies: ChatMessage[] = plan.replies.map((r) => refusalReply(r.id, r.reason));
+
+  if (!plan.fetch.length) {
+    return { kind: "continue", messages: replies };
+  }
+
+  let approved = plan.fresh;
+  if (plan.overBudget) {
+    const list = plan.fresh.join("、");
+    const ok = window.confirm(
+      `模型想读取第 ${list} 页的图像以回答这个问题。` +
+        `本次已自动读取 ${alreadyFetched.size} 页，超过 ${MAX_REFETCH_PAGES} 页上限。\n\n` +
+        `同意继续发送吗？（这会再消耗一部分额度）`
+    );
+    if (!ok) {
+      return {
+        kind: "stop",
+        reason:
+          `模型需要第 ${list} 页的图像才能回答，但本次自动补发已达上限` +
+          `（${MAX_REFETCH_PAGES} 页），已停止以免继续消耗额度。` +
+          `可以缩小问题范围，或改用能提供更多页的上下文模式。`,
+      };
+    }
+    approved = plan.fresh;
+  }
+
+  for (const page of approved) {
+    alreadyFetched.add(page);
+    panel.setPhase("preparing", 0, chat.turns().length, approved.length);
+    const shot = await adapter.renderPageImage(page, PAGE_IMAGE_MAX_EDGE);
+    pendingRefetchAttachments.push({
+      id: `refetch-${page}-${Date.now().toString(36)}`,
+      url: shot.url,
+      chars: shot.chars,
+      width: shot.width,
+      height: shot.height,
+      source: "page",
+      page,
+    });
+    const call = calls.find((c) => {
+      if (c.function?.name !== "read_page") return false;
+      try {
+        return JSON.parse(c.function.arguments || "{}")?.page === page;
+      } catch {
+        return false;
+      }
+    });
+    replies.push(imageToolReply(call?.id ?? `call_${page}`, page, shot.url));
+    toast(`正在查看第 ${page} 页…`, "info");
+  }
+
+  // Every id needs exactly one reply or the request is malformed. The plan
+  // already replies to refusals; this covers a page that was planned but not
+  // approved.
+  for (const call of calls) {
+    if (!replies.some((r) => (r as { tool_call_id?: string }).tool_call_id === call.id)) {
+      replies.push(
+        refusalReply(call.id, "这一页本次没有重新发送。请用已有内容回答，并说明缺什么。")
+      );
+    }
+  }
+
+  return { kind: "continue", messages: replies };
+}
+
+/** Images pulled in by refetches during the current question. */
+const pendingRefetchAttachments: ImageAttachment[] = [];
+/**
+ * Pages already refetched for the current question.
+ *
+ * Reset at the start of each question, and counted in pages rather than rounds:
+ * a model that asks for page 5 twice must not get two free pages.
+ */
+const refetchedPages = new Set<number>();
+
 /**
  * Whether the last question was about the whole document.
  *
@@ -694,6 +837,10 @@ async function sendWithMode(
   remember = true,
 ): Promise<void> {
   lastSendWasWholeDocument = mode === "whole-document" || mode === "whole-document-images";
+  // Fresh budget for this question. Without the reset the cap would be
+  // per-session and the second question would be refused forever.
+  refetchedPages.clear();
+  pendingRefetchAttachments.length = 0;
   if (!activeProfileId) {
     panel.show();
     toast("请先在设置中配置 AI Provider", "warn");
@@ -807,8 +954,29 @@ async function sendWithMode(
     // were. Undefined for providers that price by image content — the display
     // then says the cost is theirs rather than inventing a number.
     imageTokens: activeProfile()?.image_tokens,
+    // Offered only when the answer could actually benefit: with no document
+    // open there is no page to read, and offering the tool would invite a call
+    // that can only be refused.
+    tools: adapter.numPages ? [readPageTool(adapter.numPages)] : undefined,
+    onToolCalls: async (calls) => {
+      const outcome = await fulfilToolCalls(
+        calls,
+        adapter.numPages,
+        refetchedPages
+      );
+      return outcome;
+    },
   });
   renderChat();
+  // Pages pulled in during the answer are part of what the question was
+  // answered from, so the transcript has to show them — otherwise a later read
+  // of the conversation cannot tell why the answer mentions a figure the
+  // question never included.
+  if (pendingRefetchAttachments.length) {
+    chat.attachToLastUserTurn(pendingRefetchAttachments.slice());
+    pendingRefetchAttachments.length = 0;
+    renderChat();
+  }
   // A null turn id means the controller refused. Say *which* thing is wrong:
   // the earlier version inferred "busy" whenever any turn existed, so a session
   // with no provider set reported "上一个回答仍在进行中" — a confident, wrong

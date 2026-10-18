@@ -95,11 +95,14 @@ fn call(messages: Vec<(&str, &str)>) -> ChatCall {
         model: "mock-model".into(),
         messages: messages
             .into_iter()
-            .map(|(r, c)| ChatMessage { role: r.into(), content: c.into() })
+            .map(|(r, c)| ChatMessage { role: r.into(), content: c.into(),
+                tool_calls: None, tool_call_id: None,
+            })
             .collect(),
         temperature: None,
         session_id: None,
         send_session_header: false,
+        tools: None,
     }
 }
 
@@ -348,11 +351,14 @@ fn missing_key_fails_before_any_network_call() {
         profile_id: "profile-with-no-key".into(),
         base_url: mock_base(),
         model: "mock-model".into(),
-        messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
+        messages: vec![ChatMessage { role: "user".into(), content: "hi".into(),
+                tool_calls: None, tool_call_id: None,
+            }],
         temperature: None,
         // These two tests are about credential/URL handling, not OpenCode.
         session_id: None,
         send_session_header: false,
+        tools: None,
     };
     let c = run(req);
     match c.terminal() {
@@ -372,11 +378,14 @@ fn plain_http_to_a_remote_host_is_refused() {
         profile_id: PROFILE.into(),
         base_url: "http://api.deepseek.com".into(),
         model: "m".into(),
-        messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
+        messages: vec![ChatMessage { role: "user".into(), content: "hi".into(),
+                tool_calls: None, tool_call_id: None,
+            }],
         temperature: None,
         // These two tests are about credential/URL handling, not OpenCode.
         session_id: None,
         send_session_header: false,
+        tools: None,
     };
     let c = run(req);
     match c.terminal() {

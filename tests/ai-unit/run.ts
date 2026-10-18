@@ -1279,3 +1279,135 @@ test("a session with no provider refuses, and says so", async () => {
   assert.equal(id, null, "must not pretend to send");
   assert.equal(c.isBusy(), false, "and must not claim to be busy");
 });
+
+/* --------------------------------------- tool calls: the refetch loop (B) -- */
+
+/**
+ * The model asks for a page; the app fetches it and asks again.
+ *
+ * Two properties matter and neither is visible in a screenshot: the loop is
+ * bounded by *us* rather than by the model, and every `tool_call` id gets
+ * exactly one reply. Getting the second wrong makes the request malformed and
+ * the provider rejects it, so the failure looks like a broken model rather than
+ * a broken app.
+ */
+function makeToolController(script: Array<{ calls: any[] }>) {
+  let round = 0;
+  let seq = 0;
+  const seen: ChatMessage[][] = [];
+  const c = new ChatController({
+    // Must be unique per turn: the controller correlates events by turn id, and
+    // a duplicate makes it drop every event for the second turn as stale.
+    newId: () => `id-${++seq}`,
+    now: () => 1000,
+    onChange: () => undefined,
+    cancelChat: async () => true,
+    currentProfileId: () => "deepseek",
+    startChat: async (_rid, _pid, messages, onEvent) => {
+      seen.push(messages);
+      const step = script[round] ?? { calls: [] };
+      round++;
+      onEvent({ type: "started" });
+      if (step.calls.length) {
+        onEvent({ type: "tool_calls", calls: step.calls });
+      } else {
+        onEvent({ type: "delta", text: "最终答案" });
+        onEvent({ type: "completed", finish_reason: "stop" });
+      }
+    },
+  });
+  c.openDocument("doc-1");
+  return { c, seen };
+}
+
+const readPage = (id: string, page: number) => ({
+  id,
+  type: "function",
+  function: { name: "read_page", arguments: JSON.stringify({ page }) },
+});
+
+function toolReply(call: any): ChatMessage {
+  return {
+    role: "tool",
+    tool_call_id: call.id,
+    content: [{ type: "text", text: "页图" }, { type: "image_url", image_url: { url: "data:image/jpeg;base64,AAA" } }],
+  };
+}
+
+test("a tool call is answered and the answer is asked for again", async () => {
+  const { c, seen } = makeToolController([{ calls: [readPage("c1", 5)] }, { calls: [] }]);
+  const outcome = await c.send({
+    question: "这个图怎么读",
+    messages: [{ role: "user", content: "这个图怎么读" }],
+    ...built,
+    tools: [{ type: "function", function: { name: "read_page", description: "", parameters: {} } }],
+    onToolCalls: async (calls) => ({ kind: "continue", messages: calls.map(toolReply) }),
+  });
+
+  assert.ok(outcome, "the question must produce a turn");
+  assert.equal(seen.length, 2, "one refetch means exactly two requests");
+  // The second request must carry the echo of the call and its reply, in order.
+  const second = seen[1];
+  const assistantIdx = second.findIndex((m) => m.role === "assistant" && m.tool_calls);
+  const toolIdx = second.findIndex((m) => m.role === "tool");
+  assert.ok(assistantIdx >= 0, "the call must be echoed back");
+  assert.ok(toolIdx > assistantIdx, "the reply must follow the call");
+  assert.equal(second[toolIdx].tool_call_id, "c1");
+
+  const last = c.turns().at(-1)!;
+  assert.equal(last.phase, "completed");
+  assert.ok(last.content.includes("最终答案"), last.content);
+});
+
+test("the loop stops at two rounds however many times the model asks", async () => {
+  // The cap belongs to the app. If the model could keep asking, a document that
+  // talks it into asking for page after page would spend without end.
+  const { c, seen } = makeToolController([
+    { calls: [readPage("a", 1)] },
+    { calls: [readPage("b", 2)] },
+    { calls: [readPage("c", 3)] },
+    { calls: [readPage("d", 4)] },
+  ]);
+  await c.send({
+    question: "问",
+    messages: [{ role: "user", content: "问" }],
+    ...built,
+    onToolCalls: async (calls) => ({ kind: "continue", messages: calls.map(toolReply) }),
+  });
+
+  assert.equal(seen.length, 3, "initial request plus two refetches, and no more");
+  const last = c.turns().at(-1)!;
+  assert.equal(last.phase, "completed", "the turn must end, not hang");
+  assert.ok(last.content.includes("上限"), `must say why it stopped: ${last.content}`);
+});
+
+test("a refusal from the caller ends the turn with its reason", async () => {
+  // The user said no to spending more. That has to read as a stated outcome, not
+  // as an empty answer.
+  const { c } = makeToolController([{ calls: [readPage("c1", 9)] }]);
+  await c.send({
+    question: "问",
+    messages: [{ role: "user", content: "问" }],
+    ...built,
+    onToolCalls: async () => ({ kind: "stop", reason: "需要第 9 页，但已达上限。" }),
+  });
+  const last = c.turns().at(-1)!;
+  assert.equal(last.phase, "completed");
+  assert.ok(last.content.includes("需要第 9 页"), last.content);
+});
+
+test("without a handler a tool call does not leave the turn hanging", async () => {
+  // A caller that offers tools but cannot fulfil them must still terminate.
+  const { c } = makeToolController([{ calls: [readPage("c1", 2)] }]);
+  await c.send({ question: "问", messages: [{ role: "user", content: "问" }], ...built });
+  const last = c.turns().at(-1)!;
+  assert.notEqual(last.phase, "preparing", "the turn must not stay in flight");
+});
+
+test("a plain answer still completes in one request", async () => {
+  // The tool path must not add a round trip to questions that never needed one.
+  const { c, seen } = makeToolController([{ calls: [] }]);
+  await c.send({ question: "问", messages: [{ role: "user", content: "问" }], ...built });
+  assert.equal(seen.length, 1);
+  assert.ok(c.turns().at(-1)!.content.includes("最终答案"));
+});
