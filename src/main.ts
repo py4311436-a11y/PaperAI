@@ -549,6 +549,10 @@ async function sendWithMode(
         page: p,
       };
     },
+    // Pages the model can already see from earlier turns, so they are not
+    // rendered and sent a second time. Derived from the same window the history
+    // uses — see `pagesInHistory` on the controller for why that matters.
+    pagesInHistory: chat.pagesInHistory(),
     currentPage: adapter.currentPage,
     pageCount: adapter.numPages,
     documentTitle: currentName || "未命名文档",

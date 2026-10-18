@@ -146,8 +146,9 @@ test("the page cap stops the walk and says so", async () => {
     MAX_WHOLE_DOCUMENT_IMAGE_PAGES,
     "must stop at the cap, not walk all 30"
   );
-  assert.ok(built.label.includes("仅发送"), built.label);
+  assert.ok(built.label.includes("本次发送"), built.label);
   assert.ok(built.label.includes("共 30 页"), built.label);
+  assert.ok(built.label.includes("上限"), built.label);
   assert.equal(built.stats.truncated, true, "and it must be flagged as partial");
 });
 
@@ -251,4 +252,123 @@ test("the page image ceiling is a sane size for a rendered page", () => {
   // there is one number to reason about rather than two.
   assert.ok(PAGE_IMAGE_MAX_EDGE >= 1024, "must stay legible");
   assert.ok(PAGE_IMAGE_MAX_EDGE <= 2048, "must stay bounded");
+});
+
+// ------------------------------------------------------------------ reuse
+
+test("pages the model already has are not sent a second time", async () => {
+  // The cost trap this closes: the API is stateless, so a follow-up has to carry
+  // the document again — but the history already does, because a past question
+  // turn is rebuilt with its images. Rendering on top of that sent the same 7
+  // pages twice, doubling the most expensive part of the request for nothing.
+  let renders = 0;
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    getPageImage: async (p) => {
+      renders++;
+      return pageImg(p);
+    },
+    pagesInHistory: [1, 2, 3, 4, 5, 6, 7],
+  });
+
+  assert.equal(renders, 0, "nothing should be rasterised");
+  assert.equal(built.stats.images, 0, "and nothing sent this turn");
+  // Coverage still reports what the model holds — the pages are in the request,
+  // just inside the history rather than freshly rendered.
+  assert.deepEqual(built.stats.pages_sent, [1, 2, 3, 4, 5, 6, 7]);
+  assert.ok(built.label.includes("沿用"), built.label);
+});
+
+test("only the missing pages are rendered when some are already in history", async () => {
+  // A longer conversation: pages 1-4 are still visible from an earlier turn,
+  // 5-7 have aged out of the window and must be sent again or the model loses
+  // half the paper.
+  const sent = [];
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    getPageImage: async (p) => {
+      sent.push(p);
+      return pageImg(p);
+    },
+    pagesInHistory: [1, 2, 3, 4],
+  });
+  assert.deepEqual(sent, [5, 6, 7], "only the pages not already in the request");
+  assert.equal(built.stats.images, 3);
+  assert.ok(built.label.includes("沿用"), built.label);
+});
+
+test("a page trimmed out of history is sent again rather than skipped", async () => {
+  // The failure this guards against is silent and total: skipping a page the
+  // model cannot see loses that page from the document, and nothing in the
+  // answer reveals it. So `pagesInHistory` must be derived from the same window
+  // the history uses — verified against the real controller below, because a
+  // separate count is exactly how the two would drift apart.
+  const sent = [];
+  await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    getPageImage: async (p) => {
+      sent.push(p);
+      return pageImg(p);
+    },
+    // Only pages 1-2 are claimed to be in the request. 3-7 must be rendered.
+    pagesInHistory: [1, 2],
+  });
+  assert.deepEqual(sent, [3, 4, 5, 6, 7], "unseen pages must still be rendered");
+});
+
+test("without pagesInHistory every page is rendered", async () => {
+  // The default must be the safe one. A caller that does not know what is in
+  // history gets the whole document, not a guess.
+  const sent = [];
+  await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    getPageImage: async (p) => {
+      sent.push(p);
+      return pageImg(p);
+    },
+  });
+  assert.deepEqual(sent, [1, 2, 3, 4, 5, 6, 7]);
+});
+
+test("the coverage note still fires when pages are reused", async () => {
+  // Reuse must not quietly turn a partial document into a whole one. 12 pages
+  // of a 30-page paper, all reused from history, is still 12 of 30.
+  const built = await buildContext({
+    ...base,
+    pageCount: 30,
+    mode: "whole-document-images",
+    getPageImage: async (p) => pageImg(p),
+    pagesInHistory: Array.from({ length: 12 }, (_, i) => i + 1),
+  });
+  const last = built.messages.at(-1).content;
+  const joined = Array.isArray(last) ? last.map((p) => (p.type === "text" ? p.text : "")).join("\n") : last;
+  assert.ok(joined.includes("全文共 30 页"), `coverage note missing: ${joined.slice(0, 200)}`);
+  assert.equal(built.stats.truncated, true);
+});
+
+
+test("an all-reused follow-up is not told it has no document", async () => {
+  // The follow-up that renders nothing. The pages are in the request — inside
+  // the history, which is rebuilt with its images — so telling the model "no
+  // document was provided" contradicts what it can see, and a model told it has
+  // no paper declines to answer questions about the one it is holding.
+  //
+  // This is negative-controlled: dropping `reusedPages` from `providesDocument`
+  // fails exactly here.
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    getPageImage: async (p) => pageImg(p),
+    pagesInHistory: [1, 2, 3, 4, 5, 6, 7],
+  });
+  const last = built.messages.at(-1).content;
+  const joined = Array.isArray(last) ? last.map((p) => (p.type === "text" ? p.text : "")).join("\n") : last;
+  assert.ok(!joined.includes("没有提供论文原文"), `contradicts the pages in history: ${joined}`);
+  // And the label must say the pages were reused, not that nothing was sent —
+  // otherwise the transcript reads as a question that carried no document.
+  assert.ok(built.label.includes("沿用"), built.label);
 });

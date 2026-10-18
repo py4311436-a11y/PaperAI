@@ -207,6 +207,41 @@ and the right behaviour.
 
 ---
 
+### A-29 — 0.6.6: follow-up questions no longer re-send the pages they already sent
+
+Whole-document image mode was expensive in a way that was not obvious: asking a
+second question sent the same pages **twice**. The API is stateless, so every
+request has to carry the document — and the history already does, because a past
+question turn is rebuilt with its images intact (`questionWithImages`). The new
+turn then rendered and attached them again. For a 7-page paper that is ~7k tokens
+of images on every follow-up, half of it duplicate.
+
+**Pages already in the request are skipped.** `pagesInHistory()` reports which
+pages the model can still see, derived from the *same window* `history()` uses —
+they share `recentWindow`, and that sharing is the whole point. A separate count
+would drift, and the failure is silent and total: skip a page the model cannot
+see and that page vanishes from the document, with nothing in the answer to show
+it. The invariant is tested against the real controller, not asserted in a
+comment.
+
+**Two bugs found while wiring it up, both caught by tests rather than review:**
+
+1. A follow-up that renders nothing was told "本次没有提供论文原文" — while the
+   model was holding all seven pages from the history. A model told it has no
+   paper declines to answer questions about the one in front of it. Fixed by
+   counting reused pages towards `providesDocument`.
+2. The partial-coverage note keyed off freshly-rendered pages, so an all-reused
+   follow-up on a 12-of-30-page paper lost it — the exact case where the note
+   matters most, because the user is mid-conversation and the model would
+   summarise 12 pages and call it the article. Now keyed off total coverage.
+
+Both were negative-controlled. The first was **not** covered when it was written
+— the control run stayed green, which is how a fix that nothing guards gets
+found. A test was added for it and the control then failed exactly there.
+
+Labels distinguish "sent N pages" from "reused N from history", so the
+transcript shows what a question actually cost.
+
 ### A-28 — 0.6.5: whole-document image mode, for documents with no text at all
 
 A scanned paper has no text in the file. The user reported "未能提取到文本" on
@@ -827,3 +862,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-26 | Page text was read from the rendered DOM text layer, so extraction depended on scroll position and failed on freshly opened documents |
 | A-27 | Ctrl+wheel zoom, anchored on the cursor. Left/right Ctrl is not distinguishable on a WheelEvent, so any Ctrl zooms |
 | A-28 | Scanned documents have no text at all; whole-document image mode sends the pages as pictures, and text mode now refuses instead of sending an empty question |
+| A-29 | A follow-up question in image mode re-sent the pages the history already carried, doubling the cost; pages the model can still see are now skipped |

@@ -149,6 +149,20 @@ export interface BuildContextOptions {
    * cannot work.
    */
   getPageImage?: (page: number) => Promise<ImageAttachment>;
+  /**
+   * Pages whose images the model can already see, from earlier turns.
+   *
+   * The API is stateless, so every request has to carry the document again —
+   * but the history already does, because a past question turn is rebuilt with
+   * its images intact. Re-rendering on top of that sends the same pages twice,
+   * which doubles the most expensive part of the request for nothing.
+   *
+   * Only pages genuinely inside the history window belong here. A page trimmed
+   * out of it is invisible to the model, and skipping its render would lose the
+   * document entirely — so the caller derives this from the same window it uses
+   * for history, not from a separate count.
+   */
+  pagesInHistory?: number[];
 }
 
 export interface BuiltContext {
@@ -252,6 +266,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
    * selected by hand. They are merged only where they are actually used.
    */
   const pageImages: ImageAttachment[] = [];
+  /**
+   * Pages the model already holds from an earlier turn, so they were not
+   * re-rendered. Hoisted out of the image-mode case because
+   * `providesDocument` needs it: a follow-up that renders nothing still has the
+   * whole document in front of the model, inside the history.
+   */
+  const reusedPages: number[] = [];
 
   // For every mode except `whole-document` the wrapper is one blob and a plain
   // truncate is enough. `whole-document` decides its own coverage below, so it
@@ -369,8 +390,18 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
       }
 
       const cap = Math.min(opts.pageCount, MAX_WHOLE_DOCUMENT_IMAGE_PAGES);
+      // Pages the model already has from an earlier turn. Sending them again
+      // costs the full image price twice over, so they are skipped — but only
+      // when they are really still in the request, which is what the caller
+      // guarantees by deriving this from the history window it actually sends.
+      const alreadySeen = new Set(opts.pagesInHistory ?? []);
+      const reused = reusedPages;
       let payload = 0;
       for (let n = 1; n <= cap; n++) {
+        if (alreadySeen.has(n)) {
+          reused.push(n);
+          continue;
+        }
         let img: ImageAttachment;
         try {
           img = await opts.getPageImage(n);
@@ -392,18 +423,30 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
         pageImages.push(img);
       }
 
+      // Reused pages count towards coverage: the model has them, which is what
+      // the label is reporting. They are kept apart so the label can say which
+      // ones cost anything this turn.
+      const seen = [...pages, ...reused].sort((a, b) => a - b);
       hitPageCap = hitPageCap || cap < opts.pageCount;
       truncated = hitPageCap;
 
-      if (!pageImages.length) {
+      if (!pageImages.length && reused.length) {
+        label = `整篇图片 · 沿用对话中已有的 ${reused.length} 页（本次未重复发送）`;
+      } else if (!pageImages.length) {
         label = `整篇图片 · 渲染失败（共 ${opts.pageCount} 页）`;
-      } else if (!truncated) {
+      } else if (!truncated && !reused.length) {
         label = `整篇图片 · 共 ${pageImages.length} 页`;
+      } else if (!truncated) {
+        label = `整篇图片 · 本次发送 ${pageImages.length} 页，另 ${reused.length} 页沿用对话历史`;
       } else {
         label =
-          `整篇图片 · 仅发送第 ${pages[0]}–${pages[pages.length - 1]} 页` +
+          `整篇图片 · 本次发送 ${pageImages.length} 页` +
+          `${reused.length ? `，另 ${reused.length} 页沿用对话历史` : ""}` +
           ` / 共 ${opts.pageCount} 页（上限 ${MAX_WHOLE_DOCUMENT_IMAGE_PAGES} 页）`;
       }
+      // Coverage is what the model actually holds, reused pages included.
+      pages.length = 0;
+      pages.push(...seen);
       break;
     }
   }
@@ -442,8 +485,12 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
       : // The same silence, for the image mode: 12 pages of a 30-page paper must
         // not be presented as the whole paper, or the model summarises what it
         // was given and calls it the article.
-        opts.mode === "whole-document-images" && pageImages.length && truncated
-        ? `【重要】你收到的是该论文前 ${pageImages.length} 页的图像（全文共 ${opts.pageCount} 页，` +
+        // `pages.length`, not `pageImages.length`: a follow-up that reuses
+        // every page renders nothing, and must still be told it is looking at
+        // part of a paper. Keying this on freshly-rendered pages only would
+        // silently drop the note exactly when the user is mid-conversation.
+        opts.mode === "whole-document-images" && pages.length && truncated
+        ? `【重要】你收到的是该论文前 ${pages.length} 页的图像（全文共 ${opts.pageCount} 页，` +
           `受单次请求的页数上限所限）。请只就你看到的页面作答，明确说明你看到了哪几页，` +
           `并指出因此无法判断的部分，不要把它当作全文。`
         : "";
@@ -464,7 +511,16 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
   // provided — as pages in the question turn. So the "nothing was provided"
   // branch below must not fire, and the memory block still belongs here with
   // the document rather than after the history.
-  const providesDocument = documentText.trim().length > 0 || pageImages.length > 0;
+  // Whether this request gives the model the document at all.
+  //
+  // Pages reused from history count. They are in the request — inside the
+  // history, which is rebuilt with its images — so saying "no document was
+  // provided" would contradict what the model can actually see, and a model
+  // told it has no paper will decline to answer questions about one it is
+  // holding. This is exactly the shape of the all-reused follow-up: nothing is
+  // rendered this turn, and the document is still fully present.
+  const providesDocument =
+    documentText.trim().length > 0 || pageImages.length > 0 || reusedPages.length > 0;
   if (documentText.trim()) {
     messages.push({
       role: "user",

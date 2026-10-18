@@ -1082,3 +1082,63 @@ test("a screenshot on a scanned document is what carries the content", async () 
   assert.ok(textOf(last.content).includes(base.question));
 });
 
+
+/**
+ * The invariant the whole-document image mode's page reuse rests on.
+ *
+ * `pagesInHistory()` and `history()` must describe the same window. If they
+ * drifted — say the page list used a wider window than the messages — the
+ * builder would skip rendering a page the model can no longer see, and that page
+ * would vanish from the document with nothing in the answer to show it. That is
+ * a silent wrong answer, which is the worst kind.
+ *
+ * They share `recentWindow` by construction, so this test is the guard on that
+ * refactoring holding: it drives the controller through a conversation longer
+ * than the window and checks the two views agree.
+ */
+test("pagesInHistory and history describe the same window", async () => {
+  const { c } = makeController(async (emit) => {
+    emit({ type: "started" });
+    emit({ type: "delta", text: "答" });
+    emit({ type: "completed", finish_reason: "stop" });
+  });
+  c.openDocument("doc-1");
+  c.setProfileId("p1");
+
+  // `source` annotated so the literal is not widened to `string`, which
+  // ImageAttachment does not accept.
+  const pageAttachment = (page: number): ImageAttachment => ({
+    id: `page-${page}`,
+    url: `data:image/jpeg;base64,P${page}`,
+    chars: 1000,
+    width: 100,
+    height: 100,
+    source: "page",
+    page,
+  });
+
+  // First question carries all seven pages as images.
+  await c.send({
+    question: "概述这篇",
+    messages: [],
+    contextLabel: "整篇图片",
+    stats: { ...built.stats, images: 7 },
+    attachments: [1, 2, 3, 4, 5, 6, 7].map(pageAttachment),
+  });
+
+  // The very next question must not re-send them: they are still in the window.
+  assert.deepEqual(c.pagesInHistory(), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(c.history().length, 2, "one pair in the window");
+
+  // A plain text question must not contribute any pages.
+  await c.send({ question: "继续", messages: [], contextLabel: "当前页", stats: built.stats });
+  assert.deepEqual(c.pagesInHistory(), [1, 2, 3, 4, 5, 6, 7], "still there, one pair later");
+
+  // Push the image turn out of the window with text-only questions. The default
+  // window is six messages, so the image pair is gone after three more.
+  for (let i = 0; i < 3; i++) {
+    await c.send({ question: `q${i}`, messages: [], contextLabel: "当前页", stats: built.stats });
+  }
+  assert.deepEqual(c.pagesInHistory(), [], "aged out — the pages must be sent again");
+  assert.ok(!c.history().some((m) => typeof m.content !== "string"), "and no images in history");
+});

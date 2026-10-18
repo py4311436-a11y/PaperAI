@@ -316,24 +316,81 @@ export class ChatController {
    * or failed one carries no usable answer.
    */
   history(limit = 6): ChatMessage[] {
+    return this.recentWindow(limit).messages;
+  }
+
+  /**
+   * Page numbers whose images are still inside the history window.
+   *
+   * Exists because of a cost trap in whole-document image mode. The API is
+   * stateless, so a follow-up question has to carry the document again — and the
+   * history already does: a past question turn is rebuilt with its images intact
+   * (see `questionWithImages`). Re-rendering the pages on top of that sends the
+   * same 7 pages twice, doubling the most expensive part of the request for
+   * nothing.
+   *
+   * So the builder asks which pages the model can already see, and skips them.
+   * The window is the same one `history()` uses, by construction — they share
+   * `recentWindow` — because a page trimmed out of the history is a page the
+   * model can no longer see, and skipping its render would lose the document
+   * entirely.
+   */
+  pagesInHistory(limit = 6): number[] {
+    return [...this.recentWindow(limit).pages].sort((a, b) => a - b);
+  }
+
+  /**
+   * The history window as whole (question, answer) pairs, plus the document
+   * pages their images cover.
+   *
+   * One walk, two consumers, deliberately: `history()` and `pagesInHistory()`
+   * must agree exactly. If they used separate walks with separate limits, the
+   * builder could skip a page the controller had already trimmed out, and the
+   * model would be asked about a page it cannot see.
+   *
+   * Pairs are kept whole rather than slicing a flat list, so a question is never
+   * separated from its answer. For the default even limit this is identical to
+   * the old flat slice; for an odd one it is strictly better.
+   */
+  private recentWindow(limit: number): { messages: ChatMessage[]; pages: Set<number> } {
     const s = this.session();
-    if (!s) return [];
-    const out: ChatMessage[] = [];
+    if (!s) return { messages: [], pages: new Set() };
+
+    const groups: { messages: ChatMessage[]; pages: Set<number> }[] = [];
     for (let i = 0; i < s.turns.length; i++) {
       const t = s.turns[i];
       if (t.role !== "assistant" || t.phase !== "completed" || !t.content.trim()) continue;
       const prev = s.turns[i - 1];
-      if (prev?.role === "user") {
-        out.push({
-          role: "user",
-          content: prev.attachments?.length
-            ? questionWithImages(prev.content, prev.attachments)
-            : prev.content,
-        });
+      if (prev?.role !== "user") continue;
+
+      const attachments = prev.attachments ?? [];
+      const pages = new Set<number>();
+      for (const a of attachments) {
+        if (a.source === "page" && typeof a.page === "number") pages.add(a.page);
       }
-      out.push({ role: "assistant", content: t.content });
+      groups.push({
+        messages: [
+          {
+            role: "user",
+            content: attachments.length
+              ? questionWithImages(prev.content, attachments)
+              : prev.content,
+          },
+          { role: "assistant", content: t.content },
+        ],
+        pages,
+      });
     }
-    return out.slice(-limit);
+
+    // Walk backwards, keeping whole pairs, until the message budget is spent.
+    const messages: ChatMessage[] = [];
+    const pages = new Set<number>();
+    for (let i = groups.length - 1; i >= 0 && messages.length < limit; i--) {
+      const g = groups[i];
+      messages.unshift(...g.messages);
+      for (const p of g.pages) pages.add(p);
+    }
+    return { messages, pages };
   }
 }
 
