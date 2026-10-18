@@ -41,6 +41,7 @@ import {
   type ChunkNote,
   type PageText,
 } from "./ai/memory";
+import { fromStoredChat, isTerminalPhase } from "./ai/chat-history.js";
 import {
   captureSelection,
   installSelectionTracking,
@@ -177,13 +178,19 @@ const panel = new ChatPanel({
   onSelectModel: (profileId, model) => void chooseModel(profileId, model),
   onGenerateMemory: () => void generateMemory(),
   onScreenshot: () => armScreenshot(),
+  onIncludeHistory: (include) => {
+    includeHistory = include;
+  },
 });
 
 const chat = new ChatController({
   startChat: (id, profileId, messages, onEvent, temperature, sessionId) =>
     bridge.aiStartChat(id, profileId, messages, onEvent, temperature, sessionId),
   cancelChat: (id) => bridge.aiCancelChat(id),
-  onChange: () => renderChat(),
+  onChange: () => {
+    renderChat();
+    scheduleChatSave();
+  },
   newId: () => `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
 });
 
@@ -332,10 +339,86 @@ async function loadMemory(pdfPath: string): Promise<void> {
   panel.setMemoryState(currentMemory);
 }
 
+/**
+ * Whether earlier turns travel with the question.
+ *
+ * One flag for two things that must never disagree: the history messages and the
+ * set of pages the model is assumed to already hold. Sending history without the
+ * page list means re-sending images the model already has; sending the page list
+ * without history means skipping images the model *cannot* see — the page
+ * vanishes from the document and nothing in the answer reveals it.
+ */
+let includeHistory = true;
+
 /** The block injected into the next question, or null when there is none. */
 function memoryContext(): string | null {
   if (!currentMemory?.content?.trim()) return null;
   return memoryContextBlock(currentMemory);
+}
+
+/**
+ * Restore a document's saved conversation.
+ *
+ * Failure is logged and swallowed. A conversation that cannot be read is a loss
+ * of convenience; refusing to open the paper over it would be a loss of the
+ * thing the user actually came for.
+ */
+async function loadChatHistory(pdfPath: string): Promise<void> {
+  try {
+    const doc = await bridge.aiChatRead(pdfPath);
+    const turns = fromStoredChat(doc);
+    if (!turns.length) return;
+    chat.restoreTurns(turns);
+    renderChat();
+    toast(`已恢复 ${turns.filter((t) => t.role === "user").length} 轮历史对话`, "info");
+  } catch (e) {
+    diagnostics.log("warn", `loadChatHistory: ${String(e)}`);
+  }
+}
+
+/**
+ * Persist the conversation.
+ *
+ * Fire-and-forget by design: a failed save must not interrupt reading, and the
+ * in-memory conversation is still intact. The next turn tries again with the
+ * full session, so a transient failure self-heals — which is why this writes a
+ * snapshot of everything rather than appending one turn.
+ */
+let chatSaveChain: Promise<void> = Promise.resolve();
+let chatSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Save the conversation, but only once the newest answer has stopped changing.
+ *
+ * `onChange` fires on every streamed delta — hundreds of times per answer — and
+ * each save rewrites the whole JSON. The guard is the phase, not a timer alone:
+ * a debounce that fired mid-stream would store a truncated answer, which reads
+ * later as the model having trailed off for no reason.
+ */
+function scheduleChatSave(): void {
+  const last = chat.turns().at(-1);
+  if (!last || last.role !== "assistant" || !isTerminalPhase(last.phase)) return;
+  if (chatSaveTimer !== null) clearTimeout(chatSaveTimer);
+  chatSaveTimer = setTimeout(() => {
+    chatSaveTimer = null;
+    saveChatHistory();
+  }, 400);
+}
+
+function saveChatHistory(): void {
+  if (!currentPath) return;
+  const path = currentPath;
+  const doc = chat.snapshotForStorage(currentName || "未命名文档");
+  if (!doc.turns.length) return;
+  // Serialised so two rapid turns cannot interleave their writes and leave the
+  // file holding neither.
+  chatSaveChain = chatSaveChain
+    .then(async () => {
+      await bridge.aiChatWrite(path, doc);
+    })
+    .catch((e) => {
+      diagnostics.log("warn", `saveChatHistory: ${String(e)}`);
+    });
 }
 let cachedProfiles: ProfileStatus[] = [];
 /**
@@ -559,14 +642,23 @@ async function sendWithMode(
     // Pages the model can already see from earlier turns, so they are not
     // rendered and sent a second time. Derived from the same window the history
     // uses — see `pagesInHistory` on the controller for why that matters.
-    pagesInHistory: chat.pagesInHistory(),
+    pagesInHistory: includeHistory ? chat.pagesInHistory() : [],
     currentPage: adapter.currentPage,
     pageCount: adapter.numPages,
     documentTitle: currentName || "未命名文档",
-    history: chat.history(),
+    history: includeHistory ? chat.history() : [],
+    // Belt and braces: the flag decides both, so a caller that passes an
+    // explicit limit still cannot get history messages the page list did not
+    // account for.
+    historyLimit: includeHistory ? 6 : 0,
     // Reading memory is passed in so it lands in the stable prefix with the
     // document, not appended after the history where nothing can be cached.
     memory: currentMemory,
+    // Whole-document mode prefers the notes when they exist. That is the whole
+    // economy of a scanned paper: ~800 tokens per question against ~3150 for
+    // re-sending seven page images. Without notes the builder falls back to the
+    // document text, and then to the image mode's own path.
+    useNotesAsDocument: mode === "whole-document" && !!currentMemory?.content?.trim(),
     // Screenshots ride with the question, never with the document — see
     // composeQuestionTurn. An image in the document message would make the
     // prefix diverge on every question and cost the cache the whole time.
@@ -775,6 +867,9 @@ async function openPath(rawPath: string): Promise<boolean> {
     // Reading memory is loaded after the document so the panel can show its
     // state immediately; a failure here must never block opening the PDF.
     void loadMemory(info.path);
+    // Same rule for the conversation: a corrupt or missing history must not
+    // stop the paper from opening. It is the user's reading, not ours.
+    void loadChatHistory(info.path);
     return true;
   } catch (e) {
     diagnostics.log(

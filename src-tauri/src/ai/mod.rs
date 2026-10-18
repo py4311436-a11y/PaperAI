@@ -5,6 +5,7 @@
 //! the credential, builds the request, streams the answer back over a Channel,
 //! and returns only sanitised error codes.
 
+pub mod chat_history;
 pub mod client;
 pub mod config;
 pub mod memory;
@@ -226,11 +227,39 @@ pub fn ai_memory_write(pdf_path: String, body: String) -> Result<memory::MemoryF
 /// answers, so notes accumulate without re-summarising the paper).
 #[tauri::command]
 pub fn ai_memory_append(
-  pdf_path: String,
-  heading: String,
-  entry: String,
+    pdf_path: String,
+    heading: String,
+    entry: String,
 ) -> Result<memory::MemoryFile, AppError> {
-  memory::append_entry(std::path::Path::new(&pdf_path), &heading, &entry)
+    memory::append_entry(std::path::Path::new(&pdf_path), &heading, &entry)
+}
+
+/// A document's stored conversation, with attachment bytes inlined again.
+///
+/// Takes the *PDF's* path and derives everything else, so the frontend cannot
+/// aim a read at an arbitrary file.
+#[tauri::command]
+pub fn ai_chat_read(pdf_path: String) -> Result<Option<serde_json::Value>, AppError> {
+    chat_history::read_chat(std::path::Path::new(&pdf_path))
+}
+
+/// Replace a document's stored conversation.
+///
+/// Attachments arrive as data URLs; they are written to files beside the PDF and
+/// replaced by content-addressed references before the JSON is stored — see
+/// `chat_history` for why the bytes do not live in the JSON.
+#[tauri::command]
+pub fn ai_chat_write(
+    pdf_path: String,
+    doc: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    chat_history::write_chat(std::path::Path::new(&pdf_path), doc)
+}
+
+/// Delete a document's stored conversation, images included.
+#[tauri::command]
+pub fn ai_chat_clear(pdf_path: String) -> Result<(), AppError> {
+    chat_history::clear_chat(std::path::Path::new(&pdf_path))
 }
 
 /// Start a streamed completion.

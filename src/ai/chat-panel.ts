@@ -21,6 +21,7 @@ import type {
   ModelOption,
   ProfileStatus,
 } from "./types";
+import { formatTurnTime } from "./chat-history.js";
 import { describeChars } from "./image-capture.js";
 import { renderMarkdown } from "./markdown-renderer.js";
 // The explicit `.js` is deliberate: Vite resolves either form, but the Node
@@ -43,6 +44,13 @@ export interface ChatPanelDeps {
   onGenerateMemory: () => void;
   /** Arm region selection over the PDF viewer. */
   onScreenshot: () => void;
+  /**
+   * Whether to carry earlier turns into the request.
+   *
+   * Turned off, the request is a clean slate: no history messages *and* no
+   * remembered page images. The two must move together — see `setIncludeHistory`.
+   */
+  onIncludeHistory: (include: boolean) => void;
 }
 
 const MODE_LABELS: Record<ContextMode, string> = {
@@ -107,6 +115,7 @@ export class ChatPanel {
   private memoryBusy = false;
   /** Whether this document was found to have no extractable text. */
   private scanned = false;
+  private historyToggle!: HTMLLabelElement;
 
   constructor(private deps: ChatPanelDeps) {
     this.root = document.createElement("aside");
@@ -164,6 +173,33 @@ export class ChatPanel {
       this.hintEl.textContent = MODE_HINTS[m];
     });
     ctxRow.append(ctxLabel, this.modeSelect);
+
+    // --- whether earlier turns travel with the question
+    //
+    // A checkbox rather than a mode, because it is orthogonal: "what part of the
+    // paper" and "what came before" are separate questions, and a user asking a
+    // follow-up about a figure needs both. On by default — that is what makes a
+    // conversation a conversation — with an off switch for the case where the
+    // earlier turns are steering the answer or costing more than they are worth.
+    this.historyToggle = document.createElement("label");
+    this.historyToggle.className = "ai-history-toggle";
+    const historyBox = document.createElement("input");
+    historyBox.type = "checkbox";
+    historyBox.id = "ai-include-history";
+    historyBox.checked = true;
+    historyBox.addEventListener("change", () => {
+      this.deps.onIncludeHistory(historyBox.checked);
+      // Say what the switch actually changes: with history off, the model also
+      // stops seeing previously sent page images, so a whole-document question
+      // pays for them again.
+      this.hintEl.textContent = historyBox.checked
+        ? MODE_HINTS[this.modeSelect.value as ContextMode]
+        : "不发送往期对话：本轮是全新上下文（之前发送过的页面图片也不会被模型看到，需要考虑重新发送）。";
+    });
+    const historyText = document.createElement("span");
+    historyText.textContent = "含往期对话";
+    this.historyToggle.append(historyBox, historyText);
+    ctxRow.append(this.historyToggle);
 
     // --- reading memory
     // Long papers cannot fit in one request, so the app can keep notes about
@@ -691,6 +727,18 @@ render(turns: ChatTurn[], liveId: string | null): void {
     const role = document.createElement("div");
     role.className = "ai-role";
     role.textContent = t.role === "user" ? "你" : "AI";
+    // When it was said. Matters once conversations persist across sessions: a
+    // restored transcript with no dates cannot be told from today's, and the
+    // user has no way to know whether the paper's conclusions are older than
+    // their memory of reading it.
+    const when = formatTurnTime(t.createdAt);
+    if (when) {
+      const stamp = document.createElement("span");
+      stamp.className = "ai-turn-time";
+      stamp.textContent = when;
+      stamp.title = "发送时间";
+      role.appendChild(stamp);
+    }
     if (t.contextLabel) {
       const ctx = document.createElement("span");
       ctx.className = "ai-turn-context";

@@ -164,6 +164,7 @@ import type {
   ModelOption,
   ProfileStatus,
 } from "./ai/types";
+import type { StoredChat } from "./ai/chat-history.js";
 import { Channel } from "@tauri-apps/api/core";
 
 export async function aiListProfiles(): Promise<ProfileStatus[]> {
@@ -233,6 +234,31 @@ export async function aiMemoryAppend(
   entry: string
 ): Promise<MemoryFile> {
   return await invoke<MemoryFile>("ai_memory_append", { pdfPath, heading, entry });
+}
+
+/**
+ * Persisted conversation for a document.
+ *
+ * Shapes are defined in `ai/chat-history.ts`; the store is opaque to the bridge
+ * so the file format can change without touching this layer. `null` means the
+ * document has never been talked about.
+ */
+export async function aiChatRead(pdfPath: string): Promise<StoredChat | null> {
+  return await invoke<StoredChat | null>("ai_chat_read", { pdfPath });
+}
+
+/**
+ * Replace a document's stored conversation.
+ *
+ * Attachments go in as data URLs and come back as file references — the Rust
+ * side owns that translation, because it also owns the directory they live in.
+ */
+export async function aiChatWrite(pdfPath: string, doc: StoredChat): Promise<StoredChat> {
+  return await invoke<StoredChat>("ai_chat_write", { pdfPath, doc });
+}
+
+export async function aiChatClear(pdfPath: string): Promise<void> {
+  await invoke<void>("ai_chat_clear", { pdfPath });
 }
 
 /**

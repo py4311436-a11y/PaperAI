@@ -53,6 +53,7 @@ const suites = [
   { name: "page text extraction (A-26)", file: "tests/ai-unit/text-extraction.test.mjs" },
   { name: "ctrl+wheel zoom", file: "tests/ai-unit/wheel-zoom.test.mjs" },
   { name: "whole-page images (A-28)", file: "tests/ai-unit/whole-page-images.test.mjs" },
+  { name: "chat history store (A-31)", file: "tests/ai-unit/chat-history.test.mjs" },
 ];
 
 const results = [];

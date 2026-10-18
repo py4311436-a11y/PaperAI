@@ -207,6 +207,67 @@ and the right behaviour.
 
 ---
 
+### A-32 — 0.6.8: notes as the document, persisted conversations, history switch
+
+Three changes that all answer the same question — what does a follow-up actually
+cost, and what does the model actually know.
+
+**Notes can stand in for the document (A).** `whole-document` mode now uses the
+reading notes when the caller asks for them, and falls back to them automatically
+on a document with no extractable text. For a scanned paper read into notes by
+the image pipeline, a question costs ~800 tokens instead of ~3150 for seven page
+images. The label names the source — `整篇 · 使用阅读笔记` or
+`整篇 · 无可提取文字，改用阅读笔记` — because a transcript that says "整篇" while
+sending a summary is a lie the user cannot check.
+
+Notes are *not* substituted by default when text exists: they are a summary, and
+answering from less information while claiming otherwise is worse than paying.
+
+**Conversations persist beside the PDF (C).** `<pdf>.paperai-chat.json` holds the
+turns with ISO timestamps; `<pdf>.paperai-chat/` holds the images. Two files, not
+one, because a seven-page conversation is ~5 MB of data URLs — JSON that size is
+slow to parse, impossible to inspect, and rewritten in full every turn.
+
+The images are **content-addressed**: named by the SHA-256 of their bytes, so the
+same page appearing in several turns is stored once. A long conversation about
+one paper does not grow linearly with its own length.
+
+Details that are defects if wrong and invisible if right:
+- Write-then-rename, so a crash mid-write cannot leave truncated JSON that the
+  next open refuses to parse.
+- A missing image file drops that attachment, not the conversation: the text is
+  still worth showing.
+- Invalid JSON is an **error**, not an empty history — otherwise the next save
+  silently destroys whatever is there.
+- Filenames from the JSON are never joined into a path if they contain `/`, `\`
+  or `..`; a stored `../../Windows/win.ini` is ignored, and there is a test.
+- Only `image/*` data URLs are stored. The directory is named for images; writing
+  arbitrary payloads into it is how a storage area becomes a drop box.
+
+Timestamps are shown per turn, in local time. A restored transcript with no dates
+cannot be told from today's.
+
+**History can be turned off (D).** A checkbox in the context row. This is the one
+change here with a silent failure mode, and it bit immediately: `historyLimit: 0`
+went through `Array.slice(-0)`, which is `slice(0)` — **the whole array**. So
+"don't send history" sent all of it. A test caught it; the same test is the
+negative control for the guard.
+
+The other half of the switch is subtler: `pagesInHistory` and `history` must be
+decided together. Turning history off while keeping the page list would skip
+rendering pages the model can no longer see — the same shape as A-29, one layer
+up. Both are cleared from one flag at the call site, and tested.
+
+**Not tested:** the round trip through the real filesystem and Tauri bridge (the
+store's own rules are; the wiring is not), and the panel's checkbox state.
+
+### A-31 — chat history store
+
+The pure store: `toStoredChat` / `fromStoredChat` / `turnToMessage` /
+`formatTurnTime`, plus the Rust side in `chat_history.rs`. 15 frontend tests and
+9 Rust tests. Tolerant on read by design — an older build's file, a hand-edited
+one, or a half-written one should cost at most a turn, never the conversation.
+
 ### A-29 — 0.6.6: follow-up questions no longer re-send the pages they already sent
 
 Whole-document image mode was expensive in a way that was not obvious: asking a
@@ -863,3 +924,6 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-27 | Ctrl+wheel zoom, anchored on the cursor. Left/right Ctrl is not distinguishable on a WheelEvent, so any Ctrl zooms |
 | A-28 | Scanned documents have no text at all; whole-document image mode sends the pages as pictures, and text mode now refuses instead of sending an empty question |
 | A-29 | A follow-up question in image mode re-sent the pages the history already carried, doubling the cost; pages the model can still see are now skipped |
+| A-30 | Notes could not be generated from a scanned paper; the pipeline now reads the pages as images |
+| A-31 | Conversations persist beside the PDF (JSON + content-addressed images), with timestamps |
+| A-32 | Notes can stand in for the document in whole-document mode; history can be switched off. `slice(-0)` sent all history instead of none |

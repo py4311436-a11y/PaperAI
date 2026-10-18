@@ -372,3 +372,126 @@ test("an all-reused follow-up is not told it has no document", async () => {
   // otherwise the transcript reads as a question that carried no document.
   assert.ok(built.label.includes("沿用"), built.label);
 });
+
+/* ------------------------------------------- notes instead of the document -- */
+
+const notesFile = {
+  path: "D:/papers/paper.pdf.paperai-notes.md",
+  exists: true,
+  bytes: 1200,
+  content: "- 研究内容：把参数提取表述为序贯贝叶斯优化\n- 关键结论：分三阶段，每阶段自适应采样",
+  coveredPages: "1–7",
+};
+
+test("whole-document prefers the notes when asked to", async () => {
+  // The economy of a scanned paper: a few hundred tokens per question instead
+  // of re-sending seven page images. This is the payoff for generating notes.
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    memory: notesFile,
+    useNotesAsDocument: true,
+    getPageText: async () => "一字千金的正文".repeat(500),
+  });
+  assert.ok(built.label.includes("阅读笔记"), built.label);
+  assert.ok(built.stats.chars < 2000, `must be the notes, not the paper: ${built.stats.chars}`);
+  const joined = built.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n");
+  assert.ok(joined.includes("序贯贝叶斯优化"), "the notes are what went out");
+});
+
+test("without the flag the full text is still used", async () => {
+  // Notes are a summary. Substituting them when the user did not ask would
+  // answer from less information while the transcript claims "整篇".
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 2,
+    memory: notesFile,
+    getPageText: async (p) => `第 ${p} 页正文`,
+  });
+  assert.ok(!built.label.includes("阅读笔记"), built.label);
+  assert.deepEqual(built.stats.pages_sent, [1, 2]);
+});
+
+test("a scanned document with notes falls back to them automatically", async () => {
+  // No text anywhere, but the image pipeline read it into notes. Sending the
+  // notes is strictly better than sending nothing — and the label says what
+  // happened rather than claiming the paper was sent.
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    memory: notesFile,
+    getPageText: async () => "",
+  });
+  assert.equal(built.stats.pages_sent.length, 0);
+  assert.ok(built.label.includes("改用阅读笔记"), built.label);
+  assert.ok(built.stats.chars > 0, "there must be something in the request");
+});
+
+test("a scanned document with no notes still reports that plainly", async () => {
+  // The case that started all of this. It must not silently become an empty
+  // request with a confident label.
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    memory: null,
+    getPageText: async () => "",
+  });
+  assert.ok(built.label.includes("未能提取到文本"), built.label);
+});
+
+test("the notes are only substituted in whole-document mode", async () => {
+  // Asking for pictures and getting text would answer a different question than
+  // the one the user chose.
+  const sent = [];
+  await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    memory: notesFile,
+    useNotesAsDocument: true,
+    getPageImage: async (p) => {
+      sent.push(p);
+      return pageImg(p);
+    },
+  });
+  assert.deepEqual(sent, [1, 2, 3, 4, 5, 6, 7], "images were still rendered");
+});
+
+/* ----------------------------------- history switched off (D, negative case) -- */
+
+test("with history off, every page is rendered again", async () => {
+  // The trap this guards: `pagesInHistory` and `history` are decided separately
+  // at the call site. If history is switched off but the page list survives,
+  // the builder skips rendering pages the model can no longer see — the pages
+  // vanish from the document and nothing in the answer reveals it. Same shape
+  // as the A-29 bug, one layer up.
+  const sent = [];
+  await buildContext({
+    ...base,
+    mode: "whole-document-images",
+    history: [],
+    historyLimit: 0,
+    pagesInHistory: [], // cleared together with the history
+    getPageImage: async (p) => {
+      sent.push(p);
+      return pageImg(p);
+    },
+  });
+  assert.deepEqual(sent, [1, 2, 3, 4, 5, 6, 7], "nothing may be skipped");
+});
+
+test("historyLimit of zero drops the history messages", async () => {
+  // The flag must actually reach the wire, not just the page list.
+  const built = await buildContext({
+    ...base,
+    mode: "none",
+    history: [
+      { role: "user", content: "上一轮问题" },
+      { role: "assistant", content: "上一轮回答" },
+    ],
+    historyLimit: 0,
+  });
+  const joined = built.messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n");
+  assert.ok(!joined.includes("上一轮问题"), "history must not leak in");
+  assert.equal(built.messages.length, 2, "just system + this question");
+});

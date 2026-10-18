@@ -132,6 +132,19 @@ export interface BuildContextOptions {
    */
   memory?: MemoryFile | null;
   /**
+   * Send the reading notes in place of the document text.
+   *
+   * The whole point of `whole-document`: for a long paper, or a scanned one with
+   * no text at all, the notes are a compressed stand-in that costs a few hundred
+   * tokens instead of tens of thousands. Set by the caller when notes exist and
+   * the user has not asked to see the raw document.
+   *
+   * Only honoured in `whole-document`. In the image mode the user has explicitly
+   * asked for pictures, and quietly substituting text would answer a different
+   * question than the one they chose.
+   */
+  useNotesAsDocument?: boolean;
+  /**
    * Screenshots attached to this question.
    *
    * They land in the question turn — never in the document turn, which has to
@@ -253,6 +266,8 @@ export const SYSTEM_PROMPT = `你是 PaperAI 的学术文献阅读助手。你�
  */
 export async function buildContext(opts: BuildContextOptions): Promise<BuiltContext> {
   const limit = opts.charLimit ?? DEFAULT_CONTEXT_CHAR_LIMIT;
+  // `??` rather than `||`: an explicit 0 means "no history", and `||` would turn
+  // it back into the default.
   const historyLimit = opts.historyLimit ?? 6;
 
   const pages: number[] = [];
@@ -325,6 +340,23 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
     }
 
     case "whole-document": {
+      // Notes first when the caller asked for them: that is the whole point of
+      // the mode for a long or scanned paper — a few hundred tokens instead of
+      // tens of thousands.
+      //
+      // Not the default when text exists, because notes are a summary: sending
+      // them in place of the full text would silently answer from less
+      // information while the transcript claims "整篇".
+      const notesText = opts.memory?.content?.trim() ?? "";
+      if (opts.useNotesAsDocument && notesText) {
+        documentText = notesText;
+        // No page list: the notes are not tied to pages, and claiming coverage
+        // would let the truncation machinery report a range that does not exist.
+        label = `整篇 · 使用阅读笔记（${notesText.length} 字）`;
+        truncated = false;
+        break;
+      }
+
       const budget = opts.charLimit ?? DEFAULT_WHOLE_DOCUMENT_CHAR_LIMIT;
       const cap = Math.min(opts.pageCount, MAX_WHOLE_DOCUMENT_PAGES);
       const parts: string[] = [];
@@ -365,6 +397,18 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
       const gap = missing > 0 ? `（${missing} 页无可提取文字）` : "";
 
       if (!pages.length) {
+        // Nothing extractable anywhere. If the document has notes, they are what
+        // make it readable at all — a scanned paper read into notes by the
+        // image pipeline. Using them is strictly better than sending nothing,
+        // and the label says so rather than pretending the paper was sent.
+        if (notesText) {
+          documentText = notesText;
+          truncated = false;
+          hitPageCap = false;
+          label =
+            `整篇 · 无可提取文字，改用阅读笔记（${notesText.length} 字 / 共 ${opts.pageCount} 页）`;
+          break;
+        }
         label = `整篇 · 未能提取到文本（共 ${opts.pageCount} 页）`;
       } else if (!truncated && missing <= 0) {
         label = `整篇 · 共 ${opts.pageCount} 页`;
@@ -528,7 +572,12 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
     });
   }
 
-  const history = (opts.history ?? []).slice(-historyLimit);
+  // `slice(-0)` is `slice(0)`, which returns the *whole* array — so a limit of
+  // zero would send every turn instead of none, the exact opposite of what the
+  // caller asked for. Guard explicitly rather than trusting the negative-index
+  // idiom with a value it cannot express.
+  const history =
+    historyLimit > 0 ? (opts.history ?? []).slice(-historyLimit) : [];
   for (const m of history) {
     if (m.role === "system") continue;
     // Carried through verbatim, block array and all. A turn that asked about a

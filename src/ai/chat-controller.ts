@@ -21,6 +21,7 @@ import type {
   ContextStats,
   ImageAttachment,
 } from "./types";
+import { toStoredChat, type StoredChat } from "./chat-history.js";
 
 export interface ChatControllerDeps {
   /** Send a request and feed events back through `onEvent`. */
@@ -69,6 +70,38 @@ export class ChatController {
   constructor(private deps: ChatControllerDeps) {}
 
   // ------------------------------------------------------------- sessions
+
+  /**
+   * Load a persisted conversation into the current session.
+   *
+   * Called once, when a document is opened. Deliberately replaces rather than
+   * appends: the file is the whole history for that document, and appending on a
+   * re-open after a failed save would duplicate every turn.
+   *
+   * Only meaningful before the user has asked anything — hence the guard. A
+   * restore that lands mid-conversation would put yesterday's turns in front of
+   * today's answer.
+   */
+  restoreTurns(turns: ChatTurn[]): void {
+    const s = this.session();
+    if (!s) return;
+    if (s.turns.length) return;
+    s.turns.push(...turns);
+    this.deps.onChange();
+  }
+
+  /**
+   * The current session in the shape the store persists.
+   *
+   * A snapshot, not a reference: saving must not be able to mutate the live
+   * session, and the caller writes it asynchronously.
+   */
+  snapshotForStorage(documentTitle?: string): StoredChat {
+    return toStoredChat({
+      documentTitle,
+      turns: this.session()?.turns.slice() ?? [],
+    });
+  }
 
   openDocument(documentId: string | null): void {
     if (documentId === this.currentDocumentId) return;
