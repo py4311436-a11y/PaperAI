@@ -936,7 +936,11 @@ async function sendWithMode(
   // The mode is switched for the user rather than merely named. They asked a
   // question about a paper and got told the paper cannot be read; the next thing
   // they want is to ask it again, not to go hunting for a setting.
-  if (mode === "whole-document" && built.stats.pages_sent.length === 0) {
+  // `document_chars`, not `pages_sent`: a notes-based request carries the paper
+  // as text and has no pages, so keying on pages made a perfectly good request
+  // look like a blank scan and blocked it. That is the exact shape of the bug
+  // this line had.
+  if (mode === "whole-document" && built.stats.document_chars === 0) {
     toast("这篇文档没有可提取的文字（扫描件），已停止发送", "warn");
     // Record it so the memory row can offer the thing that actually makes this
     // document cheap to keep asking about.
@@ -947,6 +951,10 @@ async function sendWithMode(
         "（若只想问某块区域，也可继续用「截图提问」。）"
     );
     panel.selectMode("whole-document-images");
+    // Put the question back. `submit()` cleared the box before calling here, so
+    // without this the refusal silently eats what the user typed — and the next
+    // thing they must do is type it again from memory.
+    if (question) panel.setDraft(question);
     return;
   }
 

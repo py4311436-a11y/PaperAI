@@ -191,6 +191,17 @@ export interface ContextStats {
   chars: number;
   approx_tokens: number;
   truncated: boolean;
+  /**
+   * Characters of *document* content actually sent — notes count, the question
+   * does not.
+   *
+   * Exists because `chars` cannot answer "did this request carry the paper?":
+   * it also counts the question and the history, so an empty document still
+   * produces a positive number. The caller uses this to decide whether the
+   * document was readable at all, and getting it wrong once already made a
+   * notes-based request look like a blank scan.
+   */
+  document_chars: number;
   pages_sent: number[];
   /** Total pages in the document, so the UI can show real coverage. */
   pages_total: number;

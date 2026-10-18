@@ -602,6 +602,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuiltCont
     chars: bounded.length + opts.question.length + (memoryBlock?.length ?? 0),
     approx_tokens: estimateTokens(bounded) + estimateTokens(opts.question),
     truncated,
+    // The document part alone. Notes count as document content; the question
+    // does not. This is the signal for "was the paper readable at all".
+    document_chars: bounded.length,
     pages_sent: pages,
     pages_total: opts.pageCount,
     images: attachments.length,

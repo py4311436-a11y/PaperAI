@@ -495,3 +495,85 @@ test("historyLimit of zero drops the history messages", async () => {
   assert.ok(!joined.includes("上一轮问题"), "history must not leak in");
   assert.equal(built.messages.length, 2, "just system + this question");
 });
+
+/* ------------------- "was the paper readable at all?" is document_chars -- */
+
+/**
+ * The signal the caller uses to decide whether to block a text-mode question
+ * because the document cannot be read.
+ *
+ * It used to key on `pages_sent`, which is empty exactly when the notes stand in
+ * for the document — so a notes-based request looked like a blank scan and was
+ * refused with "这篇文档没有可提取的文字（扫描件），已停止发送". The request was
+ * fine; the measurement was wrong.
+ *
+ * `chars` cannot replace it either: it also counts the question, so an empty
+ * document still yields a positive number. Hence a field that means one thing.
+ */
+test("notes count as document content", async () => {
+  const built = await buildContext({
+    ...base,
+    mode: "whole-document",
+    memory: notesFile,
+    useNotesAsDocument: true,
+    getPageText: async () => "",
+  });
+  assert.ok(built.stats.document_chars > 0, "a notes request carries the paper");
+  assert.equal(
+    built.stats.pages_sent.length,
+    0,
+    "and has no pages — which is why pages_sent must not be the signal"
+  );
+});
+
+test("a fallback to notes also counts as content", () => {
+  // The scanned-document path: no text anywhere, notes carry it.
+  return buildContext({
+    ...base,
+    mode: "whole-document",
+    memory: notesFile,
+    getPageText: async () => "",
+  }).then((built) => {
+    assert.equal(built.stats.pages_sent.length, 0);
+    assert.ok(built.stats.document_chars > 0, built.label);
+  });
+});
+
+test("a document with no text and no notes reports zero document content", () => {
+  // The case that *should* be blocked, so the caller's condition must be able to
+  // reach it.
+  return buildContext({
+    ...base,
+    mode: "whole-document",
+    memory: null,
+    getPageText: async () => "",
+  }).then((built) => {
+    assert.equal(built.stats.document_chars, 0, built.label);
+  });
+});
+
+test("ordinary text counts as document content", () => {
+  return buildContext({
+    ...base,
+    mode: "whole-document",
+    pageCount: 2,
+    getPageText: async (p) => `第 ${p} 页正文`,
+  }).then((built) => {
+    assert.ok(built.stats.document_chars > 0);
+  });
+});
+
+test("the question alone is not document content", () => {
+  // `chars` counts the question; `document_chars` must not, or an unreadable
+  // paper with a long question would pass the check and be sent empty.
+  return buildContext({
+    ...base,
+    mode: "whole-document",
+    question: "一个很长的问题".repeat(50),
+    memory: null,
+    getPageText: async () => "",
+  }).then((built) => {
+    assert.equal(built.stats.document_chars, 0);
+    assert.ok(built.stats.chars > 0, "chars is positive, which is why it cannot be the signal");
+  });
+});

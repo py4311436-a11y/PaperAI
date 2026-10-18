@@ -753,6 +753,7 @@ const built = {
     chars: 10,
     approx_tokens: 4,
     truncated: false,
+    document_chars: 8,
     pages_sent: [1],
     pages_total: 1,
     images: 0,
