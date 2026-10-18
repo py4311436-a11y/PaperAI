@@ -195,12 +195,20 @@ def main() -> None:
     cursor = commit
     while cursor != remote:
         chain.append(cursor)
-        cursor = git("rev-parse", f"{cursor}^")
-        if len(chain) > 50:
+        # A root commit has no parent; `rev-parse <sha>^` fails there. Stop at it
+        # rather than crash -- if the remote is not in this history, the guard
+        # inside push_one will refuse, which is the honest outcome.
+        parent = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{cursor}^"],
+            cwd=r"D:\AIreader\PaperAI-PoC", capture_output=True, text=True,
+        ).stdout.strip()
+        if not parent:
             raise SystemExit(
-                f"no common ancestor with the remote within 50 commits; "
-                f"the histories may be unrelated (remote {remote})"
+                f"reached the root commit at {cursor[:7]} without meeting the\n"
+                f"remote ({remote[:7]}). The histories are unrelated, or the remote\n"
+                f"is on a branch this does not descend from. Not pushing."
             )
+        cursor = parent
     chain.reverse()
 
     if not chain:
