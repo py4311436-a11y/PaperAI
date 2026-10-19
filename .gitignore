@@ -46,7 +46,7 @@ evidence/**/*.pdf
 # release; committing every version would grow the repository by ~5 MiB each,
 # permanently, because git never forgets a blob.
 release/*
-!release/PaperAI_0.7.5_x64-setup.exe
+!release/PaperAI_0.7.6_x64-setup.exe
 *.local
 .DS_Store
 public/cmaps/
