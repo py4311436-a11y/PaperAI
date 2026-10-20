@@ -46,6 +46,7 @@ import {
 import { fromStoredChat, isTerminalPhase, type StoredChat } from "./ai/chat-history.js";
 import type { ToolOutcome } from "./ai/chat-controller";
 import type { ToolCall, ToolDef } from "./ai/types";
+import { looksLikeTranslation } from "./ai/translation-intent";
 import {
   MAX_REFETCH_PAGES,
   imageToolReply,
@@ -280,6 +281,10 @@ async function captureSelectionRegion(rect: ShotRect): Promise<void> {
 
   try {
     const shot = await captureRegion(canvas, region);
+    // The page's text layer holds the words inside the selection, exactly.
+    // Reading them costs nothing and needs no OCR; a scanned page has no text
+    // layer, and then the image is all there is.
+    const text = await adapter.getRegionText(page, region, canvas.width);
     panel.addAttachment({
       id: `shot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       url: shot.url,
@@ -288,9 +293,15 @@ async function captureSelectionRegion(rect: ShotRect): Promise<void> {
       height: shot.height,
       source: "region",
       page,
+      text: text || undefined,
     });
     panel.show();
-    toast(`已截取 ${shot.width}×${shot.height}，写在问题里一起发送`, "success");
+    toast(
+      text
+        ? `已截取 ${shot.width}×${shot.height}，并提取到 ${text.length} 字（可切换为「用文字」）`
+        : `已截取 ${shot.width}×${shot.height}，写在问题里一起发送`,
+      "success"
+    );
   } catch (e) {
     toast(e instanceof Error ? e.message : "截图失败", "warn");
   }
@@ -1326,6 +1337,25 @@ async function askQuestion(
   question: string,
   attachments: ImageAttachment[] = []
 ): Promise<void> {
+  // A translation request wants the *words*, and the page's text layer has them
+  // exactly — so the text is sent instead of the image. The reader can see which
+  // is in use on the chip and switch it back.
+  //
+  // Only for screenshots that actually have text: a scanned region has none,
+  // and there the image is the only source.
+  if (attachments.length && looksLikeTranslation(question)) {
+    let switched = 0;
+    for (const a of attachments) {
+      if (a.source === "region" && a.text?.trim() && !a.preferText) {
+        a.preferText = true;
+        switched++;
+      }
+    }
+    if (switched) {
+      panel.refreshAttachments();
+      toast(`这是翻译请求，已改用提取到的文字（点截图上的「用文字」可切回图片）`, "info");
+    }
+  }
   await sendWithMode(question, chat.contextMode(), attachments);
 }
 

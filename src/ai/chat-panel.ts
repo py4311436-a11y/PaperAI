@@ -394,9 +394,43 @@ export class ChatPanel {
       del.textContent = "移除";
       del.title = "移除这张截图";
       del.addEventListener("click", () => this.removeAttachment(a.id));
-      chip.append(img, label, del);
+      chip.append(img, label);
+
+      // Only a selection that actually covered text gets the switch. A scanned
+      // page has no text layer, so there is nothing to switch to, and offering
+      // it would be a control that does nothing.
+      if (a.text?.trim()) {
+        const useText = document.createElement("button");
+        useText.type = "button";
+        useText.className = "ai-attach-toggle";
+        useText.textContent = a.preferText ? "用文字 ✓" : "用文字";
+        useText.title =
+          "发送提取到的文字而不是图片。文字来自 PDF 文字层，精确无误，" +
+          "适合翻译或摘录；图里的图形、公式排版则看不到。";
+        useText.addEventListener("click", () => {
+          a.preferText = !a.preferText;
+          this.renderAttachments();
+        });
+        const count = document.createElement("span");
+        count.className = "ai-attach-count";
+        count.textContent = `${a.text.length} 字`;
+        chip.append(count, useText);
+      }
+
+      chip.append(del);
       row.append(chip);
     }
+  }
+
+  /**
+   * Redraw the attachment chips.
+   *
+   * Used when something outside the panel changed an attachment — the app
+   * switching a screenshot to its extracted text, for instance. Without this the
+   * chip would keep saying "用文字" while the request carried the image.
+   */
+  refreshAttachments(): void {
+    this.renderAttachments();
   }
 
   show(): void {

@@ -103,6 +103,8 @@ export function escapeForContext(text: string): string {
     // Same treatment for the other wrapper we emit.
     .replace(/<\s*\/\s*selection\s*>/gi, "[/selection]")
     .replace(/<\s*selection[^>]*>/gi, "[selection]")
+    .replace(/<\s*\/\s*selected_text\s*>/gi, "[/selected_text]")
+    .replace(/<\s*selected_text[^>]*>/gi, "[selected_text]")
     // Fence-collapsing so a payload cannot fake the end of a code block.
     .replace(/```/g, "'''");
 }
@@ -683,6 +685,20 @@ function composeQuestionTurn(
   // question is what the images are about.
   const parts: ContentPart[] = [{ type: "text", text: lines.join("\n") }];
   for (const a of attachments) {
+    // A selection the reader asked to send as text sends text, not the image.
+    //
+    // The words come from the page's own text layer, so they are exact -- but
+    // they are still document content, and document content is never an
+    // instruction. They are escaped and wrapped exactly like the document
+    // message is, or a paper could say "ignore the question above".
+    if (a.preferText && a.text?.trim()) {
+      parts.push({
+        type: "text",
+        text:
+          `\n<selected_text page="${a.page ?? "?"}">\n${escapeForContext(a.text)}\n</selected_text>`,
+      });
+      continue;
+    }
     parts.push({ type: "image_url", image_url: { url: a.url } });
   }
   return parts;

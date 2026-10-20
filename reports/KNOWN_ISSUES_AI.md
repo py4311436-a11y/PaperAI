@@ -207,6 +207,40 @@ and the right behaviour.
 
 ---
 
+### A-42 — 0.7.8: a screenshot can be sent as its text instead of its image
+
+The request: when a screenshot is being translated, extract the words first and
+send those, rather than the picture.
+
+**No OCR is involved, and none is needed.** The page's own text layer holds the
+words inside the selection, exactly. Reading them is free and cannot misread a
+glyph — which an OCR pass could, and which a vision model sometimes does. A
+scanned page has no text layer; there the image stays the only source, and the
+switch is not offered.
+
+**The token argument does not hold, and it is worth being honest about.** A
+1200×800 region of English prose costs about 680 tokens as an image (four 512-pixel
+tiles) and about 800 as text — the text is *more* expensive, because vision
+models encode pages of text more densely than a tokenizer does. Chinese is worse
+still: the same region is 680 tokens as an image and 1600+ as text. What the
+change actually buys is **accuracy** (exact words) and **speed** (a text model
+answers far quicker than a vision model on a large image), not tokens.
+
+**How it is used.** The screenshot chip now shows the character count and a
+「用文字」 switch. Asking for a translation switches it automatically — a request
+that is only partly about translating keeps the image, because the model cannot
+see a figure it was sent as text. The chip always shows which is in use, and one
+click changes it.
+
+The extracted text is escaped and wrapped in `<selected_text>` exactly like the
+document message, because it is document content: a paper could contain a line
+that closes the wrapper and tells the model to ignore the question.
+
+The geometry is the whole risk — a mistake there does not crash, it silently
+returns the previous paragraph — so the selection is a pure module with thirteen
+tests, and the negative control (treating the baseline as the box bottom, which
+shifts every selection up by a line) fails three of them.
+
 ### A-41 — 0.7.7: the reader can tell the assistant to append a note, or to rebuild the notes
 
 Two words, two different actions, and the assistant now understands both:
@@ -1214,3 +1248,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-39 | 0.7.5: `send()` waited on `startChat` resolving (request accepted) instead of a terminal event, so `tool_calls` arrived after the loop had already given up |
 | A-40 | 0.7.6: a paper that uses a method without explaining it could only be told 「本文没有描述」; the prompt now requires teaching the method and locating it in the paper |
 | A-41 | 0.7.7: the reader can ask to append a note or to rebuild the notes; regenerating no longer deletes the exchange log, which was being overwritten wholesale |
+| A-42 | 0.7.8: a screenshot can be sent as the text of the region, read from the page's own text layer — no OCR, exact words, faster than a vision model. It does **not** save tokens: text costs slightly more than the image for dense prose |

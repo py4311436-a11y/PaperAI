@@ -14,6 +14,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { textFromContentItems } from "./text-compose";
+import { textInRegion } from "./text-region";
 import { clampZoom, isZoomGesture, zoomFactorFor } from "./wheel-zoom";
 
 export const PDFJS_VERSION: string = (pdfjsLib as unknown as { version: string }).version;
@@ -752,6 +753,59 @@ export class PdfjsAdapter {
     }
     this.pageText.set(pageNumber, text);
     return text;
+  }
+
+  /**
+   * The text inside a rectangle of the rendered page.
+   *
+   * The reader selects a region on the canvas; the text layer of the same page
+   * holds exactly the words in that region. Reading them is free and exact,
+   * where an OCR pass would be a guess and a scan would have no text at all.
+   *
+   * The rectangle arrives in *canvas* pixels and is converted to PDF user space
+   * here, because this is the only place that knows the page's size. The scale
+   * is derived from the canvas width against the page's own width at scale 1,
+   * which is exact whatever the zoom and the device pixel ratio happen to be.
+   *
+   * Returns an empty string when the page has no text layer — a scan — so the
+   * caller can fall back to the image without a second code path.
+   */
+  async getRegionText(
+    pageNumber: number,
+    canvasRect: { x: number; y: number; width: number; height: number },
+    canvasWidth: number
+  ): Promise<string> {
+    if (!this.doc) return "";
+    try {
+      const page = await this.doc.getPage(pageNumber);
+      const base = page.getViewport({ scale: 1 });
+      if (!base.width || !base.height) return "";
+
+      // Canvas pixels per PDF user unit.
+      const k = canvasWidth / base.width;
+      if (!Number.isFinite(k) || k <= 0) return "";
+
+      // Canvas y grows downward from the top; user space grows upward from the
+      // bottom. The region has to be flipped, or it selects the mirror image
+      // of the text — a page of text in reverse order.
+      const top = base.height - canvasRect.y / k;
+      const bottom = base.height - (canvasRect.y + canvasRect.height) / k;
+
+      const content = await page.getTextContent();
+      const items = content.items.filter(
+        (i): i is typeof i & { str: string; transform: number[]; width: number; height: number } =>
+          "str" in i && Array.isArray((i as { transform?: unknown }).transform)
+      );
+      return textInRegion(items, {
+        x: canvasRect.x / k,
+        y: Math.min(bottom, top),
+        width: canvasRect.width / k,
+        height: Math.abs(top - bottom),
+      });
+    } catch (e) {
+      this.diagnostics.log("warn", `getRegionText(${pageNumber}): ${String(e)}`);
+      return "";
+    }
   }
 
   /**

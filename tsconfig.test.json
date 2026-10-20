@@ -33,6 +33,8 @@
     "src/pdf/text-compose.ts",
     "src/pdf/wheel-zoom.ts",
     "src/ai/tool-calls.ts",
+    "src/pdf/text-region.ts",
+    "src/ai/translation-intent.ts",
     "tests/ai-unit/run.ts"
   ]
 }

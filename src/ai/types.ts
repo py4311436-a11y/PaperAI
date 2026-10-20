@@ -116,6 +116,22 @@ export interface ImageAttachment {
   source: "region" | "page";
   /** 1-based page it came from, when known. */
   page?: number;
+  /**
+   * The text of the region, read from the page's text layer.
+   *
+   * Present when the page has text and the selection covered some of it. It is
+   * exact — the layer is where the words came from — so a translation of it
+   * cannot misread a glyph the way a vision model can.
+   */
+  text?: string;
+  /**
+   * Send the text instead of the image.
+   *
+   * Off by default: a figure is worth seeing, and text alone cannot describe
+   * one. The reader turns it on when what they want is the words — a
+   * translation, a quote, a definition.
+   */
+  preferText?: boolean;
 }
 
 export interface ChatMessage {

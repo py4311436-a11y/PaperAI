@@ -223,6 +223,24 @@ body {
   background: rgba(127, 127, 127, 0.05);
 }
 
+/* The "send the text, not the image" switch on a screenshot chip. */
+.ai-attach-count {
+  opacity: 0.65;
+  font-size: 11px;
+}
+.ai-attach-toggle {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.ai-attach-toggle:hover {
+  border-color: rgba(127, 127, 127, 0.7);
+}
+
 /* When a turn was sent. Quiet: the timestamp is reference information, not
    something to read on every pass. */
 .ai-turn-time {

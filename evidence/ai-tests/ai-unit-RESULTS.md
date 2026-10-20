@@ -1,6 +1,6 @@
 # Frontend AI unit tests
 
-Generated: 2026-10-20T07:14:37.380Z
+Generated: 2026-10-20T07:36:39.559Z
 Runner: scripts/run-ai-unit-tests.mjs (compiles src/ai/*.ts with tsc, then node --test)
 Compiled from: src/ai/context-builder.ts, chat-controller.ts, markdown-renderer.ts, types.ts
 
@@ -14,11 +14,13 @@ Compiled from: src/ai/context-builder.ts, chat-controller.ts, markdown-renderer.
 | reading memory chunking (A-19) | 33 | 33 |
 | page text extraction (A-26) | 14 | 14 |
 | ctrl+wheel zoom | 13 | 13 |
-| whole-page images (A-28) | 34 | 34 |
+| whole-page images (A-28) | 39 | 39 |
 | chat history store (A-31) | 19 | 19 |
 | tool call planning (B) | 21 | 21 |
 | memory body split (A-41) | 9 | 9 |
+| region text (A-42) | 13 | 13 |
+| translation intent (A-42) | 5 | 5 |
 
-**302/302 PASS**
+**325/325 PASS**
 
 These tests import the real sources, so they cannot drift from the shipped code.
