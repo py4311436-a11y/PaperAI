@@ -30,6 +30,13 @@ pub const MEMORY_SUFFIX: &str = ".paperai-notes.md";
 /// First line of every file we write. Its absence means "not ours".
 pub const MARKER: &str = "<!-- paperai-memory v1 -->";
 
+/// Heading under which the question-and-answer log is kept.
+///
+/// The summary has its own `##` sections and `### ` per-chunk notes, so the log
+/// needs a heading of its own to be distinguishable. See `splitMemoryBody` on
+/// the TypeScript side, which reads the same shape.
+pub const QA_SECTION: &str = "## 问答记录";
+
 /// Hard cap. A memory file is notes, not a copy of the paper.
 pub const MAX_MEMORY_BYTES: usize = 2 * 1024 * 1024;
 
@@ -132,12 +139,21 @@ pub fn write_memory(pdf: &Path, body: &str) -> AppResult<MemoryFile> {
 /// reading session without the app having to re-summarise the paper.
 pub fn append_entry(pdf: &Path, heading: &str, entry: &str) -> AppResult<MemoryFile> {
     let existing = read_memory(pdf)?;
-    let section = format!("\n### {heading}\n\n{entry}\n");
+    let section = format!("### {heading}\n\n{entry}\n");
     match existing {
-        None => write_memory(pdf, &format!("# 阅读笔记\n{section}")),
+        None => write_memory(pdf, &format!("# 阅读笔记\n\n{QA_SECTION}\n\n{section}")),
         Some(m) => {
             let mut body = m.content;
-            body.push_str(&section);
+            // Keep the exchanges under a heading of their own. The summary uses
+            // `### ` for its per-chunk notes, so without a marker of its own the
+            // log could not be told apart from them -- and a log that cannot be
+            // told apart is a log that gets deleted when the summary is
+            // regenerated.
+            if body.contains(QA_SECTION) {
+                body.push_str(&section);
+            } else {
+                body.push_str(&format!("\n\n{QA_SECTION}\n\n{section}"));
+            }
             // Trim the oldest Q&A entries rather than refuse to write once the
             // cap is hit: a stale note is worse than a shorter history.
             let mut candidate = body.clone();

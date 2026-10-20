@@ -31,6 +31,8 @@ import {
 } from "./ai/context-builder";
 import {
   buildMemoryDocument,
+  mergeMemoryBody,
+  splitMemoryBody,
   chunkImagePrompt,
   chunkMessages,
   memoryContextBlock,
@@ -415,6 +417,56 @@ let chatSaveTimer: ReturnType<typeof setTimeout> | null = null;
  * later as the model having trailed off for no reason.
  */
 /**
+ * The two note tools, offered together.
+ *
+ * The distinction the reader cares about is *append* versus *regenerate*, and
+ * the wording carries it: 「更新笔记」/「记到笔记里」 appends, 「重新生成笔记」 rebuilds
+ * the summary. The descriptions are the only place that mapping is written down,
+ * so they are written carefully — a model picks a tool by its description.
+ *
+ * `append_note` is cheap (one file write). `refresh_notes` re-reads the whole
+ * document, so it is expensive and the app confirms it before running.
+ */
+function noteTools(): ToolDef[] {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "append_note",
+        description:
+          "把一条内容追加到本文档的「阅读笔记」末尾，不影响已有内容。" +
+          "当用户说「更新笔记」「记到笔记里」「把这段记下来」「加上这一条」时使用。" +
+          "text 写成一条独立、可读的笔记（不要带上「好的」这类对话语气）。",
+        parameters: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "要追加的笔记内容" },
+          },
+          required: ["text"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "refresh_notes",
+        description:
+          "重新通读全文并重新生成「阅读笔记」的概要部分（会覆盖现有概要，但保留问答记录）。" +
+          "只有当用户明确要求「重新生成笔记」「重新生成阅读笔记」「重建笔记」时才使用；" +
+          "仅仅想记录一条内容时请用 append_note。这个操作会重新处理全文，代价较高，" +
+          "应用会先向用户确认。",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+    },
+  ];
+}
+
+/**
  * The one tool the app offers: read a page of the open document.
  *
  * Deliberately narrow. It takes one page number and returns that page's image;
@@ -486,6 +538,95 @@ function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T>
 /** How long one page render may take before the refetch is abandoned. */
 const REFETCH_RENDER_TIMEOUT_MS = 20_000;
 
+/**
+ * Fulfil the two note tools.
+ *
+ * `append_note` writes one line into the log; `refresh_notes` re-reads the whole
+ * document, so it is confirmed first and then run in the background — the model
+ * must not be made to wait minutes for a pipeline it only asked to start, and
+ * the turn must not be held open for it.
+ *
+ * Returns the messages to continue the conversation with. The model's next
+ * words are its own, so the wording of these replies matters: it has to be able
+ * to say truthfully "已追加" or "已开始重新生成" rather than "已完成".
+ */
+async function fulfilNoteTool(
+  call: ToolCall,
+  pageCount: number
+): Promise<{ messages: ChatMessage[]; stop?: string }> {
+  const id = call.id;
+  const name = call.function?.name ?? "";
+
+  if (name === "append_note") {
+    let text = "";
+    try {
+      text = String(JSON.parse(call.function?.arguments || "{}")?.text ?? "").trim();
+    } catch {
+      text = String(call.function?.arguments ?? "").trim();
+    }
+    if (!text) {
+      return {
+        messages: [
+          refusalReply(id, '没有提供要追加的内容。请用 {"text": "..."} 重新调用。'),
+        ],
+      };
+    }
+    try {
+      const heading = `追加 · ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
+      currentMemory = await bridge.aiMemoryAppend(currentPath ?? "", heading, text);
+      panel.setMemoryState(currentMemory);
+      bridge.uiLog(`append_note: ${text.slice(0, 60)}`);
+      return {
+        messages: [
+          {
+            role: "tool",
+            tool_call_id: id,
+            content: "已追加到阅读笔记末尾。",
+          },
+        ],
+      };
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      bridge.uiLog(`append_note failed: ${why}`);
+      return { messages: [refusalReply(id, `追加失败：${why}`)] };
+    }
+  }
+
+  if (name === "refresh_notes") {
+    const ok = window.confirm(
+      `重新生成阅读笔记需要重新处理全文（约 ${Math.max(1, Math.ceil(pageCount / 2))} 次请求）。\n\n` +
+        `现有概要会被覆盖；问答记录会保留。\n\n是否继续？`
+    );
+    if (!ok) {
+      return {
+        messages: [
+          refusalReply(id, "用户没有确认，已取消重新生成。"),
+        ],
+        stop: "（用户取消了重新生成笔记。）",
+      };
+    }
+    if (memoryBusy) {
+      return { messages: [refusalReply(id, "笔记正在生成中，请稍候再试。")] };
+    }
+    // Started, not finished: the model must not claim it is done.
+    // `allowWhileChatBusy`: the call comes from inside a live turn, and the
+    // notes pipeline does not share any state with the chat.
+    void generateMemory({ allowWhileChatBusy: true });
+    bridge.uiLog("refresh_notes: started in background");
+    return {
+      messages: [
+        {
+          role: "tool",
+          tool_call_id: id,
+          content: "已开始重新生成笔记，正在后台处理全文。完成后会更新「阅读笔记」。",
+        },
+      ],
+    };
+  }
+
+  return { messages: [refusalReply(id, `不支持的工具：${name}。`)] };
+}
+
 async function fulfilToolCalls(
   calls: ToolCall[],
   pageCount: number,
@@ -495,13 +636,43 @@ async function fulfilToolCalls(
   // Every rule about *what may be fetched* lives in `planToolCalls`, which is
   // pure and tested. This function only does the parts that need the app: a
   // confirmation, a render, a progress line.
+  const replies: ChatMessage[] = [];
+
+  // The note tools are not page fetches, so they are handled before the page
+  // plan: their rules are entirely different and they must not consume the
+  // refetch budget.
+  const noteCalls = calls.filter(
+    (c) => c.function?.name === "append_note" || c.function?.name === "refresh_notes"
+  );
+  if (noteCalls.length) {
+    let stopped: string | undefined;
+    for (const call of noteCalls) {
+      const outcome = await fulfilNoteTool(call, pageCount);
+      // Into the same list as the page replies: a model may ask for a note and
+      // a page in one turn, and every id must be answered exactly once.
+      replies.push(...outcome.messages);
+      if (outcome.stop) stopped = outcome.stop;
+    }
+    if (stopped) {
+      return { kind: "stop", reason: stopped };
+    }
+    // If the model asked for a note and a page, both are honoured.
+    const pageCalls = calls.filter(
+      (c) => c.function?.name !== "append_note" && c.function?.name !== "refresh_notes"
+    );
+    if (!pageCalls.length) {
+      return { kind: "continue", messages: replies };
+    }
+    calls = pageCalls;
+  }
+
   const plan = planToolCalls(calls, pageCount, alreadyFetched, alreadyInRequest);
   bridge.uiLog(
     `tool calls: n=${calls.length} fetch=[${plan.fetch.join(",")}] ` +
       `refused=${plan.replies.length} overBudget=${plan.overBudget} ` +
       `already=${alreadyFetched.size} inRequest=${alreadyInRequest.size}`
   );
-  const replies: ChatMessage[] = plan.replies.map((r) => refusalReply(r.id, r.reason));
+  for (const r of plan.replies) replies.push(refusalReply(r.id, r.reason));
 
   if (!plan.fetch.length) {
     return { kind: "continue", messages: replies };
@@ -1027,7 +1198,11 @@ async function sendWithMode(
     // Offered only when the answer could actually benefit: with no document
     // open there is no page to read, and offering the tool would invite a call
     // that can only be refused.
-    tools: adapter.numPages ? [readPageTool(adapter.numPages)] : undefined,
+    // The page tool only makes sense with a document open; the note tools do
+    // too (they write a file next to it), so all three come together.
+    tools: adapter.numPages
+      ? [readPageTool(adapter.numPages), ...noteTools()]
+      : undefined,
     onToolCalls: async (calls) => {
       // Pages the context mode already sent are in the request, so asking for
       // one again is a duplicate — but it must not consume the refetch budget.
@@ -1326,7 +1501,19 @@ async function onSaveAs() {
  *
  * Cost is real — one request per chunk plus a merge — so it is user-initiated.
  */
-async function generateMemory(): Promise<void> {
+/**
+ * Regenerate the reading notes.
+ *
+ * `allowWhileChatBusy` exists because the model can now ask for this from
+ * inside a conversation — and at that moment the chat *is* busy, so the usual
+ * guard would refuse the very call that was just requested.
+ *
+ * It is safe: the notes pipeline runs its own one-shot requests and never
+ * touches the chat session, so the two do not compete for the chat's state.
+ * Only `memoryBusy` still blocks it — two notes pipelines at once would fight
+ * over the same file.
+ */
+async function generateMemory(opts: { allowWhileChatBusy?: boolean } = {}): Promise<void> {
   if (!currentPath) {
     toast("未打开文档", "warn");
     return;
@@ -1336,7 +1523,7 @@ async function generateMemory(): Promise<void> {
     void settings.open();
     return;
   }
-  if (chat.isBusy() || memoryBusy) {
+  if ((!opts.allowWhileChatBusy && chat.isBusy()) || memoryBusy) {
     toast("请等待当前操作完成", "warn");
     return;
   }
@@ -1394,7 +1581,12 @@ async function generateMemory(): Promise<void> {
       overview,
       now: new Date(),
     });
-    currentMemory = await bridge.aiMemoryWrite(currentPath, body);
+    // Regenerating replaces the summary, but the log of what the reader asked
+    // and what they were told is theirs, not ours to delete. Split the old file
+    // and put the log back underneath the new summary.
+    const preserved = splitMemoryBody(currentMemory?.content ?? "");
+    const merged = mergeMemoryBody(body, preserved.qa);
+    currentMemory = await bridge.aiMemoryWrite(currentPath, merged);
     panel.setMemoryState(currentMemory);
     toast(
       `阅读笔记已保存：${chunks.length} 段 · ${currentMemory.path}`,

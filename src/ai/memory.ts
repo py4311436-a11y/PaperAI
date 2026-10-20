@@ -347,3 +347,62 @@ export function mergePrompt(notes: ChunkNote[], totalPages: number): string {
     "</chunk_notes>",
   ].join("\n");
 }
+/**
+ * Where the question-and-answer log lives inside a memory file.
+ *
+ * The summary uses `##` for its sections and `### 第 X–Y 页` for the per-chunk
+ * notes; the appended exchanges used `### 2026-10-20 15:06 · …`. So the log
+ * cannot be found by looking for `### ` — that would sweep the per-chunk notes
+ * in with it. New entries go under this heading, and legacy files are recognised
+ * by their dated headings.
+ */
+export const QA_SECTION_HEADING = "## 问答记录";
+
+/** A legacy exchange heading: a date, a time, then the question. */
+const LEGACY_QA_HEADING = /^### \d{4}-\d{2}-\d{2} \d{2}:\d{2} /;
+
+/**
+ * Split a memory file into the summary and the exchange log.
+ *
+ * Needed because regenerating the summary replaces the file, and the log is
+ * something the reader may want to keep — it is the record of what they asked
+ * and what they were told. Regenerating must not silently delete it.
+ *
+ * The split is by heading, never by "everything after the summary": the summary
+ * is not a contiguous block, it is followed by the per-chunk notes.
+ */
+export function splitMemoryBody(body: string): { summary: string; qa: string } {
+  const text = body ?? "";
+
+  // Current format: an explicit section.
+  const marker = text.indexOf(`\n${QA_SECTION_HEADING}`);
+  if (marker >= 0) {
+    return { summary: text.slice(0, marker), qa: text.slice(marker + 1) };
+  }
+  // A file that starts with the heading (no summary at all) still counts.
+  if (text.startsWith(QA_SECTION_HEADING)) {
+    return { summary: "", qa: text };
+  }
+
+  // Legacy format: dated headings at the end.
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (LEGACY_QA_HEADING.test(lines[i])) {
+      return { summary: lines.slice(0, i).join("\n"), qa: lines.slice(i).join("\n") };
+    }
+  }
+  return { summary: text, qa: "" };
+}
+
+/**
+ * Put a regenerated summary back together with the exchange log.
+ *
+ * The log is appended after the summary, because that is where it was before
+ * and where a reader expects to find it.
+ */
+export function mergeMemoryBody(summary: string, qa: string): string {
+  const s = summary.replace(/\s+$/, "");
+  const q = (qa ?? "").replace(/^\s+/, "");
+  if (!q) return s;
+  return `${s}\n\n${q}\n`;
+}

@@ -287,7 +287,7 @@ pub fn ui_log(message: String) {
 /// offering a tool that does more than read a page. The frontend still supplies
 /// the description and schema (it knows the document), but it cannot invent a
 /// name.
-const ALLOWED_TOOLS: &[&str] = &["read_page"];
+const ALLOWED_TOOLS: &[&str] = &["read_page", "append_note", "refresh_notes"];
 
 /// Reject anything outside the allowlist before a request is made.
 ///

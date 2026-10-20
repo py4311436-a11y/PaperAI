@@ -207,6 +207,38 @@ and the right behaviour.
 
 ---
 
+### A-41 — 0.7.7: the reader can tell the assistant to append a note, or to rebuild the notes
+
+Two words, two different actions, and the assistant now understands both:
+
+- 「更新笔记」 / 「记到笔记里」 / 「把这段记下来」 → `append_note`: one line appended to the log
+- 「重新生成笔记」 / 「重建笔记」 → `refresh_notes`: the summary is rebuilt
+
+The mapping lives in the tool descriptions, because that is the only place a
+model reads to choose between tools.
+
+**A data-loss bug this exposed.** Regenerating wrote the file wholesale
+(`aiMemoryWrite` replaces), and every exchange had been appended to that same
+file — so a regeneration would have silently deleted the record of what the
+reader asked and was told. The log now lives under its own `## 问答记录`
+heading, and regenerating splits the file, rebuilds the summary and puts the log
+back underneath it.
+
+The split could not be done by heading level: the summary uses `### 第 X–Y 页` for its
+per-chunk notes, so cutting on `### ` would sweep the chunk notes in with the
+log and delete those instead. Nine tests, with a negative control that cuts on
+`### ` and fails four of them.
+
+**A deadlock this would have hit.** `generateMemory` refused whenever the chat
+was busy — and the model calling a tool *is* busy, so the request that had just
+been made would have been refused. The notes pipeline runs its own one-shot
+requests and shares no state with the chat, so it is now allowed to run during a
+turn; only a second notes pipeline is still blocked.
+
+`refresh_notes` is confirmed before it runs, because it re-reads the whole
+document, and it is started in the background rather than awaited — the tool
+reply says 「已开始」, so the model cannot claim it is already done.
+
 ### A-40 — 0.7.6: questions about a method the paper only assumes
 
 A paper that tunes parameters with reinforcement learning, or with Bayesian
@@ -1181,3 +1213,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-38 | 0.7.3: an answer that stopped mid-sentence was unbounded — the ceiling only applied before the first content; and stream endings were not logged |
 | A-39 | 0.7.5: `send()` waited on `startChat` resolving (request accepted) instead of a terminal event, so `tool_calls` arrived after the loop had already given up |
 | A-40 | 0.7.6: a paper that uses a method without explaining it could only be told 「本文没有描述」; the prompt now requires teaching the method and locating it in the paper |
+| A-41 | 0.7.7: the reader can ask to append a note or to rebuild the notes; regenerating no longer deletes the exchange log, which was being overwritten wholesale |

@@ -55,6 +55,7 @@ const suites = [
   { name: "whole-page images (A-28)", file: "tests/ai-unit/whole-page-images.test.mjs" },
   { name: "chat history store (A-31)", file: "tests/ai-unit/chat-history.test.mjs" },
   { name: "tool call planning (B)", file: "tests/ai-unit/tool-calls.test.mjs" },
+  { name: "memory body split (A-41)", file: "tests/ai-unit/memory-split.test.mjs" },
 ];
 
 const results = [];

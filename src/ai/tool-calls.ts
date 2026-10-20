@@ -86,7 +86,10 @@ export function planToolCalls(
   for (const call of calls) {
     const name = call.function?.name ?? "";
     if (name !== "read_page") {
-      replies.push({ id: call.id, reason: `不支持的工具：${name}。只能调用 read_page。` });
+      // The note tools are handled elsewhere — they are not page fetches and
+      // have their own rules. Reaching here means a tool nobody implements,
+      // which must be refused by name rather than silently ignored.
+      replies.push({ id: call.id, reason: `不支持的工具：${name}。` });
       continue;
     }
     const arg = readPageArg(call.function?.arguments ?? "");
