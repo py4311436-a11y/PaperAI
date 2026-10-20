@@ -1,5 +1,5 @@
 # overlay visibility (real Chromium, computed style)
-stylesheet: dist\assets\index-CZvOVvzm.css (219530 bytes)
+stylesheet: dist\assets\index-DMyB4sNm.css (219780 bytes)
 browser   : C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe
 
 PASS  live/ai-settings  hidden=true 时必须 display:none  [display=none]

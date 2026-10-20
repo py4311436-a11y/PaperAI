@@ -81,6 +81,37 @@ const MODE_HINTS: Record<ContextMode, string> = {
     "把每一页作为图像发送，适合扫描件——那种文档里根本没有文字可提取。代价是消耗远高于文字（每页约合上千 token），且受页数上限约束，超出的页不会发送并会明确告知。需要支持图片输入的模型。",
 };
 
+/**
+ * The keys PDF.js's annotation editor takes from a text field.
+ *
+ * The list is read off the pinned pdfjs-dist: its keyboard manager maps
+ * Backspace, Delete, Ctrl+A, Ctrl+Z and Ctrl+Y to annotation commands, and the
+ * checker that is supposed to spare text fields excludes <input> but not
+ * <textarea> — which is what the composer is.
+ */
+const STEALEN_BY_PDFJS = new Set([
+  "backspace",
+  "delete",
+  "ctrl+a",
+  "ctrl+z",
+  "ctrl+y",
+  "ctrl+shift+z",
+  "meta+a",
+  "meta+z",
+  "meta+y",
+  "meta+shift+z",
+]);
+
+/** A key with its modifiers, lower-cased, the way the list is written. */
+function keyWithModifiers(e: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (e.ctrlKey) parts.push("ctrl");
+  if (e.metaKey) parts.push("meta");
+  if (e.shiftKey) parts.push("shift");
+  parts.push((e.key || "").toLowerCase());
+  return parts.join("+");
+}
+
 export class ChatPanel {
   readonly root: HTMLElement;
   private transcript: HTMLElement;
@@ -267,6 +298,24 @@ export class ChatPanel {
       if (e.key === "Enter" && !e.shiftKey && !imeOwnsIt) {
         e.preventDefault();
         this.submit();
+        return;
+      }
+
+      // PDF.js's annotation editor listens for keys on `window`, and its
+      // "is this a text field?" check excludes <input> but not <textarea>. So in
+      // the composer it claims Backspace, Delete, Ctrl+A and the undo/redo
+      // combinations, calls preventDefault, and the keystroke never reaches the
+      // box.
+      //
+      // It only does that while the editor mode is not "select", which is why
+      // this was intermittent: backspace worked in select mode and did nothing
+      // in highlight or ink mode.
+      //
+      // Stopping the propagation here keeps the event inside the composer:
+      // this listener is on the textarea itself, and PDF.js's is on the window
+      // further up the bubble path.
+      if (e.stopPropagation && STEALEN_BY_PDFJS.has(keyWithModifiers(e))) {
+        e.stopPropagation();
       }
     });
 

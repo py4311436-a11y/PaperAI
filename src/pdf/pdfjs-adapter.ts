@@ -15,6 +15,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 
 import { textFromContentItems } from "./text-compose";
 import { textInRegion } from "./text-region";
+import { captureSelection, restoreSelection } from "./selection-keep";
 import { clampZoom, isZoomGesture, zoomFactorFor } from "./wheel-zoom";
 
 export const PDFJS_VERSION: string = (pdfjsLib as unknown as { version: string }).version;
@@ -418,16 +419,76 @@ export class PdfjsAdapter {
     const before = this.annotationCount();
     try {
       await this.uiManager.updateMode?.(AnnotationEditorType.HIGHLIGHT, null, true);
-      await new Promise((r) => setTimeout(r, 200));
+      await this.ensureHighlightReady();
+      // The conversion reads the *current* selection, and the mode changes above
+      // can take it with them.
+      const kept = captureSelection();
+      restoreSelection(kept);
       this.uiManager.highlightSelection();
-      await new Promise((r) => setTimeout(r, 350));
-      const made = this.annotationCount() - before;
+      // Poll rather than sleep: the editor is created synchronously, but the
+      // count is what tells us it worked, and a fixed wait is a race with a
+      // machine that is busy.
+      const made = await this.waitForAnnotationCount(before, 1500);
       if (made > 0) this.markDirty(true);
       this.diagnostics.log("success", `Highlight created — +${made} (total=${before + made})`);
       return made;
     } catch (e) {
       this.diagnostics.log("error", `Highlight failed: ${String(e)}`);
       return 0;
+    }
+  }
+
+  /**
+   * Make sure the current page can actually produce a highlight.
+   *
+   * PDF.js attaches the pointer listener that turns a drag into a highlight
+   * when the annotation editor layer's `updateMode` runs — and only if that
+   * page's text layer had been rendered by then. A page rendered *after* the
+   * mode switch never gets the listener, and PDF.js does not re-apply the mode
+   * when the text layer appears. The page then silently refuses to highlight,
+   * until the mode is toggled and applied a second time.
+   *
+   * That is the whole of the reported symptom: the highlight button did
+   * nothing, and switching to select and back made it work.
+   *
+   * The check reads the class PDF.js itself sets (`highlighting` on the text
+   * layer), so it asks the same question the browser does rather than guessing
+   * at PDF.js's internals.
+   */
+  private async ensureHighlightReady(): Promise<void> {
+    const layer = this.textLayerDiv();
+    if (!layer || layer.classList.contains("highlighting")) return;
+
+    this.diagnostics.log("warn", "Highlight: page text layer not in highlight mode — re-applying");
+    // Keep the selection across the round trip: leaving highlight mode aborts
+    // the text layer's pointer listener, and the conversion needs the words.
+    const kept = captureSelection();
+    await this.uiManager?.updateMode?.(AnnotationEditorType.NONE, null, true);
+    await this.uiManager?.updateMode?.(AnnotationEditorType.HIGHLIGHT, null, true);
+    restoreSelection(kept);
+  }
+
+  /** The text layer of the page on screen, if it has been rendered. */
+  private textLayerDiv(): HTMLElement | null {
+    const page = this.currentPage;
+    const pg = document.querySelector(`.page[data-page-number="${page}"]`);
+    return pg?.querySelector<HTMLElement>(".textLayer") ?? null;
+  }
+
+  /**
+   * Wait until the annotation count grows, or give up.
+   *
+   * The editor is created synchronously by `highlightSelection()`, but reading
+   * the count is what proves it worked. A fixed sleep is a race with a busy
+   * machine; this asks the question instead.
+   */
+  private async waitForAnnotationCount(before: number, timeoutMs: number): Promise<number> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const made = this.annotationCount() - before;
+      if (made > 0) return made;
+      if (Date.now() >= deadline) return 0;
+      await new Promise((r) => setTimeout(r, 50));
     }
   }
 

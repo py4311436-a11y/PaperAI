@@ -207,6 +207,41 @@ and the right behaviour.
 
 ---
 
+### A-43 — 0.7.9: the composer keeps its keys, and a page that cannot highlight can
+
+Two reports, both about the same interaction with PDF.js.
+
+**Backspace in the composer sometimes did nothing.** PDF.js's annotation
+editor listens for keys on `window`, and the check that is supposed to spare text
+fields excludes `<input>` but **not `<textarea>`** — which is what the composer is.
+So it claimed Backspace, called `preventDefault`, and the keystroke never reached
+the box. It only did that while the editor mode was not "select", which is why
+it looked intermittent: backspace worked in select mode and did nothing in
+highlight or ink mode. Delete, Ctrl+A, Ctrl+Z and Ctrl+Y were taken the same way
+— so undo inside the composer was PDF.js undoing an annotation.
+
+The fix keeps the event inside the composer. The listener is on the textarea
+itself and PDF.js's is further up the bubble path, so stopping the propagation
+here is enough. Only the keys PDF.js actually takes are stopped: a blanket stop
+would break the app's own Ctrl+S.
+
+**A page that could not be highlighted until the mode was toggled.** PDF.js
+attaches the pointer listener that turns a drag into a highlight when the
+annotation editor layer's `updateMode` runs — and only if that page's text layer
+had been rendered by then. A page rendered *after* the mode switch never gets the
+listener, and PDF.js does not re-apply the mode when the text layer appears. The
+page then silently refuses to highlight, which is exactly what was reported: the
+button did nothing, and switching to select and back made it work.
+
+The app now checks the class PDF.js itself sets on the text layer
+(`highlighting`) and, if the page is not in it, leaves and re-enters the mode —
+the same thing the reader was doing by hand. The selection is captured and
+restored across that round trip, because the conversion reads the current
+selection and the mode change can take it away.
+
+The fixed sleeps around the conversion (200 ms, 350 ms) are replaced by polling
+the annotation count, which is the thing that actually proves it worked.
+
 ### A-42 — 0.7.8: a screenshot can be sent as its text instead of its image
 
 The request: when a screenshot is being translated, extract the words first and
@@ -1249,3 +1284,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-40 | 0.7.6: a paper that uses a method without explaining it could only be told 「本文没有描述」; the prompt now requires teaching the method and locating it in the paper |
 | A-41 | 0.7.7: the reader can ask to append a note or to rebuild the notes; regenerating no longer deletes the exchange log, which was being overwritten wholesale |
 | A-42 | 0.7.8: a screenshot can be sent as the text of the region, read from the page's own text layer — no OCR, exact words, faster than a vision model. It does **not** save tokens: text costs slightly more than the image for dense prose |
+| A-43 | 0.7.9: PDF.js took Backspace, Delete and the undo shortcuts from the composer (its text-field check excludes `<input>` but not `<textarea>`); and a page whose text layer rendered after the mode switch could not highlight until the mode was toggled |

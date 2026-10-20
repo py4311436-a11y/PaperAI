@@ -286,3 +286,92 @@ test("an input method's Enter is not a send", () => {
   input.fire("keydown", { key: "Enter", shiftKey: false, isComposing: true, keyCode: 229, preventDefault() {} });
   assert.equal(calls.send, 0, "must not send half-typed pinyin");
 });
+
+/* ------------------------- the composer keeps the keys PDF.js wants (A-43) -- */
+
+/**
+ * Backspace in the composer sometimes did nothing.
+ *
+ * PDF.js's annotation editor listens for keys on `window` and its "is this a
+ * text field?" check excludes <input> but not <textarea> — which is what the
+ * composer is. So it claimed Backspace, called preventDefault, and the
+ * keystroke never reached the box. It only did that while the editor mode was
+ * not "select", which is why it looked intermittent.
+ *
+ * The fix keeps the event inside the composer: this listener is on the textarea,
+ * PDF.js's is further up the bubble path.
+ */
+function composerKey(over = {}) {
+  const stopped = { value: false };
+  const ev = {
+    key: "Backspace",
+    shiftKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    isComposing: false,
+    keyCode: 8,
+    preventDefault() {},
+    stopPropagation() {
+      stopped.value = true;
+    },
+    ...over,
+  };
+  return { ev, stopped };
+}
+
+test("backspace in the composer is not taken by the annotation editor", () => {
+  const { panel } = panelWithSpy();
+  panel.setPhase("idle", 0, 0);
+  const input = composerInput(panel);
+  const { ev, stopped } = composerKey();
+  input.fire("keydown", ev);
+  assert.equal(stopped.value, true, "the event must not reach PDF.js on window");
+});
+
+test("the same is true of delete and the select-all and undo shortcuts", () => {
+  // All of them are mapped to annotation commands by PDF.js's keyboard
+  // manager, and all of them are ordinary editing keys in a text box.
+  const cases = [
+    { key: "Delete" },
+    { key: "a", ctrlKey: true },
+    { key: "z", ctrlKey: true },
+    { key: "y", ctrlKey: true },
+    { key: "z", ctrlKey: true, shiftKey: true },
+  ];
+  for (const c of cases) {
+    const { panel } = panelWithSpy();
+    panel.setPhase("idle", 0, 0);
+    const input = composerInput(panel);
+    const { ev, stopped } = composerKey(c);
+    input.fire("keydown", ev);
+    assert.equal(stopped.value, true, `the event must not reach PDF.js: ${JSON.stringify(c)}`);
+  }
+});
+
+test("ordinary typing keys are left alone", () => {
+  // Stopping the propagation of every key would break the app's own window
+  // shortcuts, so only the ones PDF.js actually takes are stopped.
+  const { panel } = panelWithSpy();
+  panel.setPhase("idle", 0, 0);
+  const input = composerInput(panel);
+  for (const key of ["a", "Backspace", "ArrowLeft", "Escape", "Tab"]) {
+    const { ev, stopped } = composerKey({ key });
+    input.fire("keydown", ev);
+    if (key === "Backspace") {
+      assert.equal(stopped.value, true, "backspace is taken");
+    } else {
+      assert.equal(stopped.value, false, `${key} must pass through`);
+    }
+  }
+});
+
+test("ctrl+s still reaches the window, so saving a PDF still works", () => {
+  // The app saves on Ctrl+S from a window-level listener. Blanket-stopping
+  // propagation in the composer would silently break that.
+  const { panel } = panelWithSpy();
+  panel.setPhase("idle", 0, 0);
+  const input = composerInput(panel);
+  const { ev, stopped } = composerKey({ key: "s", ctrlKey: true });
+  input.fire("keydown", ev);
+  assert.equal(stopped.value, false, "ctrl+s must reach the app");
+});
