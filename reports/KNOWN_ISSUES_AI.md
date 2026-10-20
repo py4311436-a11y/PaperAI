@@ -207,6 +207,32 @@ and the right behaviour.
 
 ---
 
+### A-46 — 0.7.12: the model was asked to re-read a document it was already holding
+
+Two reports, and the second one is a design fault rather than a limit.
+
+**The model was told to verify a document it already had.** In the
+whole-document image mode every page is in the request as an image — at the same
+resolution `read_page` produces. The model said 「我先把全部 9 页逐页核对一遍」 and set about fetching all nine
+pages one by one, which is what spent the budget and left a half-answer.
+
+The page tool is now **not offered at all** in that mode. A tool that is not
+offered cannot be called, so this is a fix rather than a request to the model to
+be sensible. In the other modes the tool now says what the model is already
+holding — the text, the nearby pages, the selection — and what the tool is
+then for.
+
+**The page budget was two.** A question of the kind this app exists for —
+「核对笔记，同时我好奇……」 — wants the whole paper, and two pages stopped it half way.
+The budget is now twelve, the same ceiling the whole-document image mode already
+uses, so reading pages on demand costs no more than sending them all. Four
+rounds instead of two.
+
+The tests that pinned the old numbers were written against the numbers rather
+than the policy, so they had to be edited — and editing them is how a policy
+change slips through unexamined. They are written against the constants now: what
+matters is that the budget is enforced, not what it happens to be today.
+
 ### A-45 — 0.7.11: the highlight path is checked where it is used, and it is now visible
 
 Follow-up to A-43, after the reader confirmed the problem happens on a paper
@@ -1339,3 +1365,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-43 | 0.7.9: PDF.js took Backspace, Delete and the undo shortcuts from the composer (its text-field check excludes `<input>` but not `<textarea>`); and a page whose text layer rendered after the mode switch could not highlight until the mode was toggled |
 | A-44 | 0.7.10: the window froze while an answer streamed — every token rebuilt the turn and re-laid-out the transcript, so a screenshot, a toast or a click all waited for the answer to end |
 | A-45 | 0.7.11: the highlight readiness check ran only on the "convert an existing selection" path, not on "press the button and drag"; PDF.js-side logs died with the session; a refused highlight still said "已进入高亮模式" |
+| A-46 | 0.7.12: in the whole-document image mode the model was invited to re-fetch every page as an image it already had; the page budget was two pages, which stopped a question that needed the whole paper |

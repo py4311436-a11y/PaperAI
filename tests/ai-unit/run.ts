@@ -19,7 +19,7 @@ import {
   DEFAULT_CONTEXT_CHAR_LIMIT,
   PRESET_PROMPTS,
 } from "../../src/ai/context-builder.js";
-import { ChatController } from "../../src/ai/chat-controller.js";
+import { ChatController, MAX_TOOL_ROUNDS } from "../../src/ai/chat-controller.js";
 import type {
   ChatMessage,
   ContentPart,
@@ -1385,15 +1385,18 @@ test("a tool call is answered and the answer is asked for again", async () => {
   assert.ok(last.content.includes("最终答案"), last.content);
 });
 
-test("the loop stops at two rounds however many times the model asks", async () => {
+test("the loop stops at the round cap however many times the model asks", async () => {
   // The cap belongs to the app. If the model could keep asking, a document that
   // talks it into asking for page after page would spend without end.
-  const { c, seen } = makeToolController([
-    { calls: [readPage("a", 1)] },
-    { calls: [readPage("b", 2)] },
-    { calls: [readPage("c", 3)] },
-    { calls: [readPage("d", 4)] },
-  ]);
+  //
+  // The number of rounds is a policy, so the test is written against the
+  // constant: a test that hard-codes "two" has to be edited every time the
+  // policy moves, and that edit is how a change slips through unexamined.
+  const script = [];
+  for (let i = 0; i < MAX_TOOL_ROUNDS + 3; i++) {
+    script.push({ calls: [readPage(`c${i}`, i + 1)] });
+  }
+  const { c, seen } = makeToolController(script);
   await c.send({
     question: "问",
     messages: [{ role: "user", content: "问" }],
@@ -1401,7 +1404,11 @@ test("the loop stops at two rounds however many times the model asks", async () 
     onToolCalls: async (calls) => ({ kind: "continue", messages: calls.map(toolReply) }),
   });
 
-  assert.equal(seen.length, 3, "initial request plus two refetches, and no more");
+  assert.equal(
+    seen.length,
+    MAX_TOOL_ROUNDS + 1,
+    "the initial request plus the allowed refetches, and no more"
+  );
   const last = c.turns().at(-1)!;
   assert.equal(last.phase, "completed", "the turn must end, not hang");
   assert.ok(last.content.includes("上限"), `must say why it stopped: ${last.content}`);

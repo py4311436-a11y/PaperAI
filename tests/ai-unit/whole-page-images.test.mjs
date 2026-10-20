@@ -19,6 +19,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  pageToolOffered,
+  whatTheModelAlreadyHas,
+} from "../../dist-test/src/ai/tool-offer.js";
+
+import {
   buildContext,
   MAX_IMAGE_PAYLOAD_CHARS,
   MAX_WHOLE_DOCUMENT_IMAGE_PAGES,
@@ -719,4 +724,39 @@ test("the extracted text is labelled as coming from a page", async () => {
   const text = parts.map((p) => p.text ?? "").join("\n");
   assert.ok(text.includes("<selected_text"), text.slice(0, 200));
   assert.ok(text.includes("3"), "the page number should be there");
+});
+
+/* ------------- the page tool is not offered where the pages are sent -- */
+
+/**
+ * In the whole-document image mode every page is already in the request, as an
+ * image, at the same resolution `read_page` would produce.
+ *
+ * Offering the tool there invited the model to fetch all nine pages one by one
+ * to "verify" a document it was already holding — spending the whole budget to
+ * be told what it knew, and ending with a half-answer and a note to ask again.
+ *
+ * A tool that is not offered cannot be called, so this is a design fix rather
+ * than a matter of nagging the model.
+ */
+test("the whole-document image mode does not offer the page tool", () => {
+  // The real decision function, not a copy of it in the test: a test that
+  // re-implements the logic proves only that the copy works.
+  assert.equal(pageToolOffered("whole-document-images"), false);
+  assert.equal(pageToolOffered("whole-document"), true);
+  assert.equal(pageToolOffered("nearby-pages"), true);
+  assert.equal(pageToolOffered("selection"), true);
+});
+
+test("the page tool says what the model already has", () => {
+  // In the text mode the document's text is already sent, so the tool is for
+  // the figures and formulas the text cannot carry. A model that does not know
+  // what it has will fetch it again.
+  for (const mode of ["whole-document", "nearby-pages", "selection"]) {
+    const text = whatTheModelAlreadyHas(mode);
+    assert.ok(text.includes("已经发给你了"), `${mode} must say what is already sent`);
+    assert.ok(text.includes("read_page"), `${mode} must say what the tool is for`);
+  }
+  // The image mode does not offer the tool, so it has nothing to explain.
+  assert.equal(whatTheModelAlreadyHas("whole-document-images"), "");
 });

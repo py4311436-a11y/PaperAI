@@ -120,16 +120,36 @@ test("the first two pages fit the budget", () => {
   assert.deepEqual(plan.fresh, [1, 2]);
 });
 
-test("a third page exceeds it and needs approval", () => {
-  // The user's cap. Enough for one detail plus the figure it is in, not enough
-  // for the model to read the whole paper one page at a time.
-  const plan = planToolCalls([readPage("a", 1), readPage("b", 2), readPage("c", 3)], 7, none);
-  assert.equal(plan.overBudget, true);
-  assert.equal(MAX_REFETCH_PAGES, 2, "the cap is the user's number, not a round one");
+test("a page beyond the budget needs approval", () => {
+  // Expressed against the cap rather than a fixed number: what matters is that
+  // the budget is enforced, not what it happens to be today. A test that
+  // hard-codes "the third page" has to be edited every time the cap moves, and
+  // editing it is how a policy change slips through unexamined.
+  const calls = [];
+  for (let i = 0; i <= MAX_REFETCH_PAGES; i++) {
+    calls.push(readPage(`c${i}`, i + 1));
+  }
+  const plan = planToolCalls(calls, 40, none);
+  assert.equal(plan.overBudget, true, "one page past the cap must need approval");
+  assert.equal(plan.fresh.length, MAX_REFETCH_PAGES + 1);
+});
+
+test("a whole paper within the cap needs no approval", () => {
+  // The case the cap was raised for: a model that reads a short paper end to
+  // end, in one go, must not be interrupted for approval.
+  const calls = [];
+  for (let i = 0; i < 7; i++) calls.push(readPage(`c${i}`, i + 1));
+  const plan = planToolCalls(calls, 7, none);
+  assert.equal(plan.overBudget, false, "seven pages must fit inside the cap");
+  assert.equal(plan.fresh.length, 7);
 });
 
 test("budget already spent means even one more page needs approval", () => {
-  const plan = planToolCalls([readPage("c", 3)], 7, new Set([1, 2]));
+  const spent = new Set();
+  for (let i = 0; i < MAX_REFETCH_PAGES; i++) spent.add(i + 1);
+  // A page inside the document: one outside it is refused as out of range, and
+  // the test would be measuring the wrong refusal.
+  const plan = planToolCalls([readPage("c", MAX_REFETCH_PAGES + 1)], 40, spent);
   assert.equal(plan.overBudget, true);
 });
 
@@ -216,12 +236,14 @@ test("a page not in the request still spends budget when one was sent", () => {
 });
 
 test("budget and duplicates are counted separately", () => {
-  // Two refetches already spent, and the model asks for one already sent plus
-  // one new one: the duplicate is free, the new one exceeds the budget.
+  // The budget is spent, and the model asks for one page already sent plus one
+  // new one: the duplicate is free, the new one exceeds the budget.
+  const spent = new Set();
+  for (let i = 10; i < 10 + MAX_REFETCH_PAGES; i++) spent.add(i);
   const plan = planToolCalls(
     [readPage("a", 1), readPage("b", 9)],
     30,
-    new Set([4, 5]),
+    spent,
     new Set([1])
   );
   assert.deepEqual(plan.fetch, [9], "only the page not already carried is planned");

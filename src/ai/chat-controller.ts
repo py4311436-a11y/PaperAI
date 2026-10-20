@@ -27,13 +27,13 @@ import type { ToolCall, ToolDef } from "./types";
 /**
  * Automatic page refetches allowed per question.
  *
- * The user's number, and a policy rather than a protocol limit: one refetch
- * covers the normal case (the notes were not enough for one specific detail),
- * two covers needing a figure *and* its caption. Beyond that the model is
- * guessing at what to read, and the honest move is to stop and let the user
- * decide rather than to keep spending.
+ * A policy rather than a protocol limit. Two rounds stopped the model half
+ * way through a question that needed the whole paper, which left the reader
+ * with a partial answer and a note to ask again. Four rounds, with a page
+ * budget of its own, covers a paper read end to end and still stops a model
+ * that keeps asking for the sake of it.
  */
-export const MAX_TOOL_ROUNDS = 2;
+export const MAX_TOOL_ROUNDS = 4;
 
 /** What the caller wants to happen after a tool call. */
 export type ToolOutcome =
@@ -465,7 +465,8 @@ export class ChatController {
         if (round >= MAX_TOOL_ROUNDS) {
           turnRef.content +=
             (turnRef.content ? "\n\n" : "") +
-            "（模型还想继续读取更多页面，但本次已用完自动补发的上限。可以缩小问题范围后再问。）";
+            "（本次自动补发的轮次已达上限，模型还想继续读取页面。" +
+            "上面是已经核对过的部分；如果需要完整结论，可以就其中某一部分再问一次。）";
           turnRef.phase = "completed";
           s.activeRequestId = null;
           this.deps.onChange();

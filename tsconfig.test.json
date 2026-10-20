@@ -36,6 +36,7 @@
     "src/pdf/text-region.ts",
     "src/pdf/selection-keep.ts",
     "src/ai/translation-intent.ts",
+    "src/ai/tool-offer.ts",
     "tests/ai-unit/run.ts"
   ]
 }

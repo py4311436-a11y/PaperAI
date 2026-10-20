@@ -23,8 +23,19 @@
 
 import type { ToolCall } from "./types";
 
-/** Refetch budget per question. The user's number. */
-export const MAX_REFETCH_PAGES = 2;
+/**
+ * Refetch budget per question, in distinct pages.
+ *
+ * Two was too small for the questions this app exists for: "check the notes
+ * against the original, and by the way how would you do X" wants the whole
+ * paper, and a two-page budget stopped the model half way through with a
+ * half-answer.
+ *
+ * The ceiling is the same as the one the whole-document image mode already
+ * uses, so a question that reads pages on demand costs no more than the mode
+ * that sends them all.
+ */
+export const MAX_REFETCH_PAGES = 12;
 
 export interface ToolPlan {
   /** Pages to fetch, in the order the model asked, de-duplicated. */

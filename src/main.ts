@@ -47,6 +47,7 @@ import { fromStoredChat, isTerminalPhase, type StoredChat } from "./ai/chat-hist
 import type { ToolOutcome } from "./ai/chat-controller";
 import type { ToolCall, ToolDef } from "./ai/types";
 import { looksLikeTranslation } from "./ai/translation-intent";
+import { pageToolOffered, whatTheModelAlreadyHas } from "./ai/tool-offer";
 import {
   MAX_REFETCH_PAGES,
   imageToolReply,
@@ -490,14 +491,19 @@ function noteTools(): ToolDef[] {
  * has to be small enough to reason about — and the name is checked again in Rust
  * against its own allowlist.
  */
-function readPageTool(pageCount: number): ToolDef {
+function readPageTool(pageCount: number, alreadyHave: string): ToolDef {
   return {
     type: "function",
     function: {
       name: "read_page",
       description:
         `读取当前论文某一页的图像。只有在笔记或已提供的内容不足以回答时才调用；` +
-        `一次只取一页，需要多页就分多次调用。本文档共 ${pageCount} 页。`,
+        `一次只取一页，需要多页就分多次调用（可以在同一条消息里并行请求多页）。` +
+        `本文档共 ${pageCount} 页。` +
+        alreadyHave +
+        `一个问题最多可以自动补发 ${MAX_REFETCH_PAGES} 页图像` +
+        `（超出时会先询问用户），所以请一次性规划好要读哪几页，` +
+        `优先读与问题直接相关的页面。`,
       parameters: {
         type: "object",
         properties: {
@@ -1273,8 +1279,19 @@ async function sendWithMode(
     // that can only be refused.
     // The page tool only makes sense with a document open; the note tools do
     // too (they write a file next to it), so all three come together.
+    //
+    // Except in the whole-document image mode, where the tool is not offered at
+    // all: every page is already in the request as an image, at the same
+    // resolution `read_page` would produce. Offering it there invited the model
+    // to fetch all nine pages one by one to "verify" a document it was already
+    // holding, spending the whole budget to be told what it knew.
     tools: adapter.numPages
-      ? [readPageTool(adapter.numPages), ...noteTools()]
+      ? [
+          ...(pageToolOffered(mode)
+            ? [readPageTool(adapter.numPages, whatTheModelAlreadyHas(mode))]
+            : []),
+          ...noteTools(),
+        ]
       : undefined,
     onToolCalls: async (calls) => {
       // Pages the context mode already sent are in the request, so asking for
