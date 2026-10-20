@@ -88,12 +88,26 @@ export interface LogEntry {
 export class Diagnostics {
   private readonly entries: LogEntry[] = [];
   private listeners = new Set<(e: LogEntry) => void>();
+  /**
+   * Where the lines also go, so they survive the session.
+   *
+   * The in-memory ring is what the diagnostics panel shows, but it dies with
+   * the app. A failure in the PDF.js side — a highlight that was refused, a
+   * mode that did not apply — is exactly the kind of thing that has to be
+   * looked at afterwards, and it was invisible on the machine.
+   */
+  sink: ((line: string) => void) | null = null;
 
   log(level: LogLevel, msg: string): void {
     const entry: LogEntry = { t: Date.now(), level, msg };
     this.entries.push(entry);
     if (this.entries.length > 2000) this.entries.shift();
     for (const l of this.listeners) l(entry);
+    try {
+      this.sink?.(`pdf: ${level} ${msg}`);
+    } catch {
+      // A log that cannot be written must never break the thing it is logging.
+    }
   }
 
   on(fn: (e: LogEntry) => void): () => void {
@@ -387,6 +401,17 @@ export class PdfjsAdapter {
     // module-level `CurrentPointers` state. Without it a second stroke is
     // dropped by an early return in DrawingEditor.startDrawing().
     await this.uiManager.updateMode?.(mode, null, true);
+    // Entering highlight mode has to leave the page actually able to highlight.
+    //
+    // PDF.js attaches the pointer listener that turns a drag into a highlight
+    // when the editor layer's updateMode runs, and only if that page's text
+    // layer has been rendered by then; leaving the mode tears the listener down
+    // again. A page whose text layer appears later, or whose mode was applied
+    // before the page existed, ends up unable to highlight — silently, and until
+    // the mode is toggled. See `ensureHighlightReady`.
+    if (tool === "highlight") {
+      await this.ensureHighlightReady();
+    }
     this.diagnostics.log("info", `Tool -> ${tool} (mode=${mode})`);
   }
 
@@ -406,6 +431,18 @@ export class PdfjsAdapter {
    * that already had highlights as a success — which is how "highlight did
    * nothing" could still look like it worked.
    */
+  /**
+   * Whether the reader currently has text selected.
+   *
+   * Used to tell apart "nothing was selected, drag over some text" from "a
+   * selection was there and the highlight was still refused" — two failures
+   * that used to look identical, and the second one is a bug.
+   */
+  hasTextSelection(): boolean {
+    const sel = window.getSelection?.();
+    return !!sel && !sel.isCollapsed && sel.rangeCount > 0;
+  }
+
   async highlightSelection(): Promise<number> {
     if (!this.uiManager) {
       this.diagnostics.log("error", "Highlight: AnnotationEditorUIManager unavailable");
@@ -457,7 +494,8 @@ export class PdfjsAdapter {
    */
   private async ensureHighlightReady(): Promise<void> {
     const layer = this.textLayerDiv();
-    if (!layer || layer.classList.contains("highlighting")) return;
+    if (!layer) return;
+    if (layer.classList.contains("highlighting")) return;
 
     this.diagnostics.log("warn", "Highlight: page text layer not in highlight mode — re-applying");
     // Keep the selection across the round trip: leaving highlight mode aborts

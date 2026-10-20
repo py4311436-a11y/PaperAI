@@ -1,5 +1,5 @@
 Toolbar tool-state + math delimiters — real Chromium
-Generated: 2026-10-20T09:03:08.396Z
+Generated: 2026-10-20T11:21:47.612Z
 
 [PASS] T1 初始只有一个按钮亮着
     lit=["btn-select"]

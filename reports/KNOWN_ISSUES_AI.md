@@ -207,6 +207,30 @@ and the right behaviour.
 
 ---
 
+### A-45 — 0.7.11: the highlight path is checked where it is used, and it is now visible
+
+Follow-up to A-43, after the reader confirmed the problem happens on a paper
+**with** a text layer — so it is not a scan that cannot be selected.
+
+**The check was in the wrong place.** A-43 verified that the current page's text
+layer is in highlight mode, but it did so inside `highlightSelection()` — the
+path that converts an *existing* selection. The path the reader actually uses is
+usually the other one: press the button, then drag over the text. That path goes
+through PDF.js's own pointer handler, and it never went through the check. The
+check now runs when the mode changes, which covers both.
+
+**The failure was invisible.** The PDF.js side of the app logged into an
+in-memory ring that died with the session, so "a highlight that was refused"
+existed only until the window closed. Those lines now go to `paperai.log` as
+well, next to the AI side. A failure that has to be read afterwards has to
+survive the session.
+
+**The message no longer claims success it does not have.** "已进入高亮模式" was
+shown whether or not anything had been highlighted, so a refusal looked like the
+app was working. It now distinguishes "there was nothing selected, drag over
+some text" from "there was a selection and the highlight was still refused" —
+the second one is a bug and says so.
+
 ### A-44 — 0.7.10: the window stops freezing while an answer streams
 
 Taking a screenshot while an answer was streaming was very slow, the screenshot
@@ -1314,3 +1338,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-42 | 0.7.8: a screenshot can be sent as the text of the region, read from the page's own text layer — no OCR, exact words, faster than a vision model. It does **not** save tokens: text costs slightly more than the image for dense prose |
 | A-43 | 0.7.9: PDF.js took Backspace, Delete and the undo shortcuts from the composer (its text-field check excludes `<input>` but not `<textarea>`); and a page whose text layer rendered after the mode switch could not highlight until the mode was toggled |
 | A-44 | 0.7.10: the window froze while an answer streamed — every token rebuilt the turn and re-laid-out the transcript, so a screenshot, a toast or a click all waited for the answer to end |
+| A-45 | 0.7.11: the highlight readiness check ran only on the "convert an existing selection" path, not on "press the button and drag"; PDF.js-side logs died with the session; a refused highlight still said "已进入高亮模式" |

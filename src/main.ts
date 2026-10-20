@@ -110,6 +110,10 @@ const toastEl = $("#toast");
 const viewerWrap = $("#viewer-wrap");
 
 const diagnostics = new Diagnostics();
+// The PDF.js side of the app into the same log file as the AI side: a highlight
+// that was refused, a mode that did not apply — those are the failures that
+// have to be read afterwards, and they were only in memory.
+diagnostics.sink = (line) => bridge.uiLog(line);
 // Mirror adapter diagnostics to the console so WebView2 devtools show them too.
 diagnostics.on((e) => {
   if (e.level === "error") console.error("[PaperAI]", e.msg);
@@ -1102,6 +1106,14 @@ async function doHighlight(): Promise<void> {
   const made = await adapter.highlightSelection();
   if (made > 0) {
     setDirty(true);
+    return;
+  }
+  // Nothing was made. Two quite different reasons, and the user needs to be
+  // told which: there was no selection to convert, or the conversion was
+  // refused. Both used to end in the same cheerful "已进入高亮模式", which
+  // looked like the app was working.
+  if (adapter.hasTextSelection()) {
+    toast("高亮没有成功——请在 PDF 里重新拖选文字再试一次", "warn");
   } else {
     // Not a warning: the mode is now armed, this is what to do next.
     toast("已进入高亮模式：在 PDF 中拖选文字即可高亮", "info");
