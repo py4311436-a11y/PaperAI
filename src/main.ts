@@ -997,7 +997,57 @@ function openChatSession(documentId: string): void {
   if (activeProfileId) chat.setProfileId(activeProfileId);
 }
 
+/** Pending coalesced repaint while an answer streams. */
+let streamRenderTimer: number | null = null;
+/** True while a coalesced repaint is queued. */
+let streamRenderPending = false;
+/** How often the transcript is repainted during a stream. */
+const STREAM_REPAINT_MS = 80;
+
+/**
+ * Repaint the transcript.
+ *
+ * While an answer is streaming the only thing that changes is the live turn's
+ * text — and it changes on every token. Repainting on each one saturates the
+ * main thread, and everything else the reader does in the meantime — taking a
+ * screenshot, dismissing a toast, clicking a button — queues behind it and then
+ * all happens at once when the answer ends. That is what "the screenshot did
+ * not appear until the answer finished" was.
+ *
+ * So a burst of tokens is coalesced into one repaint. The delay is a fraction
+ * of a second against an answer that takes tens of seconds, and the alternative
+ * is an app that feels frozen for the whole of it.
+ *
+ * The repaint is also deferred only while a turn is *streaming*: a phase change,
+ * a new turn, a cancellation — anything that changes what is on screen in a way
+ * the reader is waiting for — goes through immediately.
+ */
 function renderChat(): void {
+  const turns = chat.turns();
+  const activeAt = turns.findIndex((t) => t.phase === "preparing" || t.phase === "streaming");
+  const active = activeAt >= 0 ? turns[activeAt] : undefined;
+
+  if (active?.phase === "streaming" && !streamRenderPending) {
+    streamRenderPending = true;
+    streamRenderTimer = window.setTimeout(() => {
+      streamRenderTimer = null;
+      streamRenderPending = false;
+      paintChat();
+    }, STREAM_REPAINT_MS);
+    return;
+  }
+  // Not a stream, or the state changed in a way the reader is waiting for: show
+  // it now rather than at the next tick.
+  if (streamRenderTimer !== null) {
+    clearTimeout(streamRenderTimer);
+    streamRenderTimer = null;
+    streamRenderPending = false;
+  }
+  paintChat();
+}
+
+/** The actual repaint. `renderChat` decides *when*; this does the work. */
+function paintChat(): void {
   const turns = chat.turns();
   const activeAt = turns.findIndex((t) => t.phase === "preparing" || t.phase === "streaming");
   const active = activeAt >= 0 ? turns[activeAt] : undefined;

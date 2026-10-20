@@ -134,6 +134,17 @@ export class ChatPanel {
    * than no attachment feature at all.
    */
   private attachments: ImageAttachment[] = [];
+  /**
+   * The text node of the answer being streamed.
+   *
+   * Held so a token can update the text in place. Rebuilding the turn per
+   * token — which is what the general path does — detaches and re-attaches a
+   * subtree, and the browser then re-lays-out the whole transcript. On a long
+   * answer that is the difference between a smooth stream and a frozen window.
+   */
+  private liveTextNode: Text | null = null;
+  /** The turn that owns `liveTextNode`. */
+  private liveTextFor: string | null = null;
   /** The chip row, rebuilt whenever the attachment list changes. */
   private attachRow!: HTMLElement;
   /** Warning about the current model and images, when there is one. */
@@ -811,6 +822,22 @@ render(turns: ChatTurn[], liveId: string | null): void {
       const sig = turnSignature(t);
       const cached = this.turnCache.get(t.id);
       if (cached && cached.sig === sig) continue;
+
+      // The live turn, still streaming: only its text grew. Change the text
+      // node and leave the DOM alone. Rebuilding it would detach the turn and
+      // re-lay-out the transcript, once per token.
+      if (
+        cached &&
+        this.liveTextNode &&
+        this.liveTextFor === t.id &&
+        t.role === "assistant" &&
+        t.phase === "streaming"
+      ) {
+        this.liveTextNode.nodeValue = t.content;
+        cached.sig = sig;
+        continue;
+      }
+
       const node = this.renderTurn(t);
       const old = cached?.node ?? this.transcript.children[i];
       if (old) this.transcript.replaceChild(node, old);
@@ -839,6 +866,11 @@ render(turns: ChatTurn[], liveId: string | null): void {
 }
 
   private renderTurn(t: ChatTurn): HTMLElement {
+    // Any rebuild of the live turn invalidates the held text node.
+    if (t.id === this.liveTextFor) {
+      this.liveTextNode = null;
+      this.liveTextFor = null;
+    }
     const wrap = document.createElement("div");
     wrap.className = `ai-turn ai-turn-${t.role}`;
     wrap.dataset.turnId = t.id;
@@ -891,10 +923,14 @@ render(turns: ChatTurn[], liveId: string | null): void {
     if (t.role === "assistant" && t.phase === "streaming" && t.id === this.liveTurnId) {
       // Plain text while streaming: cheap, and never half-parsed markup.
       body.classList.add("streaming");
-      body.textContent = t.content;
+      // The text node is held so a later token can change it in place.
+      const textNode = document.createTextNode(t.content);
       const caret = document.createElement("span");
       caret.className = "ai-caret";
+      body.appendChild(textNode);
       body.appendChild(caret);
+      this.liveTextNode = textNode;
+      this.liveTextFor = t.id;
     } else if (t.phase === "error") {
       // A-16: keep whatever arrived before the failure. A truncated answer is
       // still the model's work, and it is often the part the user needs in order

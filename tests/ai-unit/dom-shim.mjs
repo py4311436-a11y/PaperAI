@@ -75,6 +75,22 @@ export class ShimNode {
     if (v !== "" && v != null) this.appendChild(new ShimNode("#text")._setText(String(v)));
   }
 
+  /**
+   * The text of a text node, by the DOM's other name for it.
+   *
+   * `Text.nodeValue` and `Text.textContent` are the same value, and code that
+   * holds a text node to write into later reaches for `nodeValue`. Without it
+   * the assignment lands on a plain property and silently does nothing, so a
+   * test watching that text never sees the update — a shim gap in the same
+   * family as the missing `classList.toggle`.
+   */
+  get nodeValue() {
+    return this._text ?? "";
+  }
+  set nodeValue(v) {
+    this._text = String(v);
+  }
+
   _setText(t) {
     this._text = t;
     return this;

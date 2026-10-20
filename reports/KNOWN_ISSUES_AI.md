@@ -207,6 +207,34 @@ and the right behaviour.
 
 ---
 
+### A-44 — 0.7.10: the window stops freezing while an answer streams
+
+Taking a screenshot while an answer was streaming was very slow, the screenshot
+did not appear in the composer, the "已提取到文字" notice never appeared — and all
+of it turned up at once when the answer ended.
+
+The screenshot was not the problem. The main thread was saturated: every token
+rebuilt the whole turn and replaced it in the transcript, and the browser then
+re-laid-out everything, once per token. Anything the reader did in the meantime
+queued behind that and ran all at the end.
+
+Two changes, both about the same thing:
+
+**The live turn's text is changed in place.** The text node of the answer being
+written is held, and a token writes to it. Rebuilding the turn — which is what
+the general path does — detaches a subtree and re-lays-out the transcript.
+
+**A burst of tokens is coalesced into one repaint.** The transcript is repainted
+at most every 80 ms while an answer streams. A phase change, a new turn, a
+cancellation — anything the reader is waiting for — still goes through at
+once.
+
+The first of the two needed a shim fix as well: the DOM shim had no
+`Text.nodeValue`, so the assignment landed on a plain property and did nothing.
+That is the same family of gap as the missing `classList.toggle` — a fake that
+cannot express what the code does, and a test that therefore watches the wrong
+thing. The shim was taught `nodeValue` rather than the code taught to avoid it.
+
 ### A-43 — 0.7.9: the composer keeps its keys, and a page that cannot highlight can
 
 Two reports, both about the same interaction with PDF.js.
@@ -1285,3 +1313,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-41 | 0.7.7: the reader can ask to append a note or to rebuild the notes; regenerating no longer deletes the exchange log, which was being overwritten wholesale |
 | A-42 | 0.7.8: a screenshot can be sent as the text of the region, read from the page's own text layer — no OCR, exact words, faster than a vision model. It does **not** save tokens: text costs slightly more than the image for dense prose |
 | A-43 | 0.7.9: PDF.js took Backspace, Delete and the undo shortcuts from the composer (its text-field check excludes `<input>` but not `<textarea>`); and a page whose text layer rendered after the mode switch could not highlight until the mode was toggled |
+| A-44 | 0.7.10: the window froze while an answer streamed — every token rebuilt the turn and re-laid-out the transcript, so a screenshot, a toast or a click all waited for the answer to end |

@@ -375,3 +375,79 @@ test("ctrl+s still reaches the window, so saving a PDF still works", () => {
   input.fire("keydown", ev);
   assert.equal(stopped.value, false, "ctrl+s must reach the app");
 });
+
+/* ------------------- a streaming answer must not rebuild the transcript -- */
+
+/**
+ * While an answer was streaming, taking a screenshot was unbearably slow, the
+ * screenshot did not appear in the composer, and the "已提取到文字" notice
+ * never appeared — all of it showed up at once when the answer ended.
+ *
+ * The cause was not the screenshot: the main thread was saturated. Every token
+ * rebuilt the whole turn and replaced it in the transcript, and the browser then
+ * re-laid-out everything, once per token. Anything the reader did in the
+ * meantime queued behind that and ran all at the end.
+ *
+ * So the live turn's text is changed in place: the text node is held, and a
+ * token writes to it.
+ */
+const liveTurn = (content) => ({
+  id: "t2",
+  role: "assistant",
+  content,
+  phase: "streaming",
+  createdAt: 1,
+});
+
+const userTurn = {
+  id: "t1",
+  role: "user",
+  content: "问",
+  phase: "completed",
+  createdAt: 1,
+};
+
+function assistantNode(panel) {
+  return panel.root.querySelector(".ai-turn-assistant");
+}
+
+test("the streaming turn's node is reused as the text grows", () => {
+  const { panel } = panelWithSpy();
+  panel.render([userTurn, liveTurn("开头")], "t2");
+  const before = assistantNode(panel);
+  assert.ok(before, "the turn must be on screen");
+  const textBefore = before.textContent;
+  assert.ok(textBefore.includes("开头"), textBefore);
+
+  // Another token.
+  panel.render([userTurn, liveTurn("开头更长")], "t2");
+  const after = assistantNode(panel);
+  assert.equal(after, before, "the turn node must be the same object, not a rebuild");
+  assert.ok(after.textContent.includes("开头更长"), after.textContent);
+});
+
+test("the turn is rebuilt once the answer is finished", () => {
+  // The plain-text streaming body is replaced by the markdown body, so the
+  // answer is readable once it is complete — and that rebuild is the one place
+  // detaching the node is correct.
+  const { panel } = panelWithSpy();
+  panel.render([userTurn, liveTurn("开头")], "t2");
+  const streaming = assistantNode(panel);
+  panel.render([userTurn, { ...liveTurn("开头"), phase: "completed" }], "t2");
+  const done = assistantNode(panel);
+  assert.notEqual(done, streaming, "the finished turn is a different node");
+  assert.ok(done.textContent.includes("开头"), done.textContent);
+});
+
+test("a turn that is not the live one is not touched by the fast path", () => {
+  // The in-place update is for the answer being written. An earlier answer that
+  // changed must still be re-rendered.
+  const { panel } = panelWithSpy();
+  const first = { id: "t1", role: "assistant", content: "旧的", phase: "completed", createdAt: 1 };
+  panel.render([first, liveTurn("新")], "t2");
+  const before = panel.root.querySelector(".ai-turn-assistant");
+  assert.ok(before);
+  panel.render([{ ...first, content: "改过的" }, liveTurn("新")], "t2");
+  const after = panel.root.querySelector(".ai-turn-assistant");
+  assert.ok(after.textContent.includes("改过的"), after.textContent);
+});
