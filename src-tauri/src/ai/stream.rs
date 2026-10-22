@@ -36,6 +36,8 @@ pub struct Chunk {
     pub error_message: Option<String>,
     /// True when this chunk carried no choices at all (usage-only tail).
     pub usage_only: bool,
+    /// The model's thinking, when the chunk carried some.
+    pub reasoning: Option<String>,
     /// Tool-call fragments carried by this chunk.
     ///
     /// A fragment, not a finished call: the protocol streams `id`, `name` and
@@ -78,6 +80,22 @@ struct RawChoice {
 struct RawDelta {
     #[serde(default)]
     content: Option<String>,
+    /// The model's thinking, on the models that show it.
+    ///
+    /// DeepSeek's reasoner, and others, stream this separately from `content`.
+    /// It used to be dropped here, which is why a model that spent two minutes
+    /// thinking looked exactly like a model that had hung.
+    ///
+    /// Field name varies by vendor — `reasoning_content` (DeepSeek),
+    /// `reasoning` (OpenAI-compatible gateways), `thinking` (Anthropic-shaped).
+    /// All three are read, because a vendor switch must not silently turn the
+    /// thinking display back into a blank wait.
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
+    thinking: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<RawToolCall>>,
 }
@@ -264,6 +282,18 @@ fn convert(raw: RawChunk) -> Chunk {
                                 None => t,
                             });
                         }
+                    }
+                    // Whichever of the three field names the vendor used.
+                    let thinking = d
+                        .reasoning_content
+                        .or(d.reasoning)
+                        .or(d.thinking)
+                        .filter(|t| !t.is_empty());
+                    if let Some(t) = thinking {
+                        c.reasoning = Some(match c.reasoning.take() {
+                            Some(prev) => prev + &t,
+                            None => t,
+                        });
                     }
                     for (pos, raw) in d.tool_calls.unwrap_or_default().into_iter().enumerate() {
                         c.tool_calls.push(ToolCallDelta {

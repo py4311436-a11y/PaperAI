@@ -731,7 +731,11 @@ test("the default ceiling is inside every provider's documented limit", () => {
 
 // ---------------------------------------------------------- chat controller
 
-function makeController(behaviour?: (emit: (ev: any) => void) => Promise<void>) {
+function makeController(
+  behaviour?: (emit: (ev: any) => void) => Promise<void>,
+  /** Extra dependencies, for the calls the controller makes back to the shell. */
+  extra?: Partial<ConstructorParameters<typeof ChatController>[0]>
+) {
   let n = 0;
   const listeners: Array<(ev: any) => void> = [];
   const c = new ChatController({
@@ -743,6 +747,7 @@ function makeController(behaviour?: (emit: (ev: any) => void) => Promise<void>) 
       listeners.push(onEvent);
       if (behaviour) await behaviour(onEvent);
     },
+    ...extra,
   });
   return { c, listeners };
 }
@@ -1443,4 +1448,66 @@ test("a plain answer still completes in one request", async () => {
   await c.send({ question: "问", messages: [{ role: "user", content: "问" }], ...built });
   assert.equal(seen.length, 1);
   assert.ok(c.turns().at(-1)!.content.includes("最终答案"));
+});
+
+/* ------------- a stalled model is asked about, not cut off (A-47) ------- */
+
+/**
+ * The content deadline exists to catch streams that have died. A model that is
+ * visibly still thinking has not died, and ending the request there throws away
+ * work that may be seconds from finishing.
+ *
+ * The event is not an error and does not close the turn: it puts the choice to
+ * the reader, and the request is still open when it arrives.
+ */
+test("a stalled model is reported rather than ending the answer", async () => {
+  const stalls: number[] = [];
+  let emit!: (ev: unknown) => void;
+  const { c } = makeController(
+    async (e) => {
+      emit = e;
+    },
+    { onStalled: (s) => stalls.push(s), currentProfileId: () => "p1" }
+  );
+  c.openDocument("doc-1");
+
+  const p = c.send({ question: "q", messages: [{ role: "user", content: "q" }], ...built });
+  await new Promise((r) => setTimeout(r, 5));
+
+  emit({ type: "started" });
+  emit({ type: "stalled", waited_secs: 181 });
+  // The turn is still streaming: being told the model is slow is not being told
+  // the answer failed.
+  assert.equal(c.turns().at(-1)!.phase, "streaming", "the request must still be open");
+  assert.deepEqual(stalls, [181], "the reader must be asked with how long it waited");
+
+  emit({ type: "completed", finish_reason: "stop" });
+  await p;
+  assert.equal(c.turns().at(-1)!.phase, "completed");
+});
+
+test("the thinking is kept on the turn and never added to the answer", async () => {
+  let emit!: (ev: unknown) => void;
+  const { c } = makeController(async (e) => {
+    emit = e;
+  }, { currentProfileId: () => "p1" });
+  c.openDocument("doc-1");
+
+  const p = c.send({ question: "q", messages: [{ role: "user", content: "q" }], ...built });
+  await new Promise((r) => setTimeout(r, 5));
+
+  emit({ type: "started" });
+  emit({ type: "reasoning", text: "先确认问题要什么。" });
+  emit({ type: "delta", text: "这是答案。" });
+  emit({ type: "completed", finish_reason: "stop" });
+  await p;
+
+  const last = c.turns().at(-1)!;
+  assert.ok(last.content.includes("这是答案。"), last.content);
+  // The thinking was never part of the answer: a reader who copies it must not
+  // get the model's reasoning with it.
+  assert.ok(!last.content.includes("先确认问题要什么"), `the thinking leaked: ${last.content}`);
+  // And it is cleared once the answer starts, because it was a progress display
+  // and not something to read afterwards.
+  assert.equal(last.thinking, undefined, `the thinking must be cleared: ${last.thinking}`);
 });

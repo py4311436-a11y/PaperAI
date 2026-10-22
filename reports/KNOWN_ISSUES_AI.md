@@ -207,6 +207,40 @@ and the right behaviour.
 
 ---
 
+### A-47 — 0.7.13: the thinking is shown, and a thinking model is not cut off
+
+Two halves of the same problem: the app knew more than it told the reader.
+
+**The thinking was thrown away.** Providers stream it separately
+(`reasoning_content`, or `reasoning`, or `thinking` — all three are read now), and
+the parser dropped the field, so a model that spent two minutes reasoning looked
+exactly like a model that had hung. It is now shown in the turn while there is
+no answer, and dropped the moment the answer starts — the screen is always
+either 「模型正在思考」 or the answer, never both, and it is never part of
+`content`: a reader who copies the answer must not get the reasoning with it.
+
+Only the tail is kept (600 characters). A reasoning model can emit tens of
+thousands, and this is a progress signal rather than something to read.
+
+**A thinking model is no longer cut off.** The content deadline exists to catch
+streams that have died, and a model that is visibly still thinking has not died.
+So thinking now resets that deadline (progress is progress), and when it expires
+after thinking has been seen, the app emits `Stalled` and **asks the reader** —
+keep waiting, or stop — instead of ending the request. Each answer buys five
+more minutes, three times over, so a provider that thinks once and then dies
+still ends. A stream that produced nothing at all is still cut off exactly as
+before: there is nothing to show, and nothing for the reader to decide.
+
+The test for this nearly measured the wrong thing: the first version asserted
+"no error was emitted", but the mock stops sending entirely, so an error does
+follow — after the reader was asked, which is the correct order. What matters is
+the order, and that is what it asserts now.
+
+The frontend needed a matching fix the compiler could not have caught: the
+per-token fast path updates one text node in place, and the thinking is a
+sibling element, so the answer would have appeared with the thinking still
+sitting above it. The fast path takes it down, and a test pins that.
+
 ### A-46 — 0.7.12: the model was asked to re-read a document it was already holding
 
 Two reports, and the second one is a design fault rather than a limit.
@@ -1366,3 +1400,4 @@ honest explanation. Documented in the `opencode_zen_preset` doc comment.
 | A-44 | 0.7.10: the window froze while an answer streamed — every token rebuilt the turn and re-laid-out the transcript, so a screenshot, a toast or a click all waited for the answer to end |
 | A-45 | 0.7.11: the highlight readiness check ran only on the "convert an existing selection" path, not on "press the button and drag"; PDF.js-side logs died with the session; a refused highlight still said "已进入高亮模式" |
 | A-46 | 0.7.12: in the whole-document image mode the model was invited to re-fetch every page as an image it already had; the page budget was two pages, which stopped a question that needed the whole paper |
+| A-47 | 0.7.13: the model's thinking was parsed and thrown away, so a long reasoning wait looked like a hang; and a thinking model was cut off at the deadline instead of the reader being asked |

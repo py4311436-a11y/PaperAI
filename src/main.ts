@@ -214,6 +214,7 @@ const chat = new ChatController({
   // created later must inherit it.
   currentProfileId: () => activeProfileId,
   log: (message) => bridge.uiLog(message),
+  onStalled: (waitedSecs) => askAboutStall(waitedSecs),
   onChange: () => {
     renderChat();
     scheduleChatSave();
@@ -432,6 +433,30 @@ let chatSaveTimer: ReturnType<typeof setTimeout> | null = null;
  * a debounce that fired mid-stream would store a truncated answer, which reads
  * later as the model having trailed off for no reason.
  */
+/**
+ * The model has been thinking past the deadline, and has produced nothing.
+ *
+ * The 180-second deadline exists to catch streams that have died. A model that
+ * is visibly still thinking has not died, and ending the request there throws
+ * away work that may be seconds from finishing — so the choice is the reader's:
+ * keep waiting, or stop. Either way it is a decision made on purpose, not one
+ * the app made on their behalf.
+ */
+function askAboutStall(waitedSecs: number): void {
+  const minutes = Math.max(1, Math.round(waitedSecs / 60));
+  const keep = window.confirm(
+    `模型已经思考了约 ${minutes} 分钟，还没有给出答案。\n\n` +
+      `它可能仍在处理复杂问题（连接是通的）。\n\n` +
+      `「确定」继续等待，「取消」停止这次回答。`
+  );
+  if (keep) {
+    toast("继续等待模型…", "info");
+    return;
+  }
+  toast("已停止这次回答", "info");
+  void chat.cancelActive();
+}
+
 /**
  * The two note tools, offered together.
  *

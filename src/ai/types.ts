@@ -154,6 +154,22 @@ export interface ChatMessage {
 export type AiStreamEvent =
   | { type: "started" }
   | { type: "delta"; text: string }
+  /**
+   * The model's thinking.
+   *
+   * Shown while the model works so a long wait reads as work rather than as a
+   * hang, and dropped the moment the answer starts. Never part of `content`:
+   * a reader who copies the answer must not get the reasoning with it.
+   */
+  | { type: "reasoning"; text: string }
+  /**
+   * The model has produced nothing for longer than the content deadline allows,
+   * after having been seen to think.
+   *
+   * The UI puts the choice to the reader — keep waiting, or stop. The request is
+   * still open when this arrives; the app does not decide for them.
+   */
+  | { type: "stalled"; waited_secs: number }
   | { type: "completed"; finish_reason: string | null }
   | { type: "cancelled" }
   | { type: "error"; code: string; safe_message: string }
@@ -260,6 +276,14 @@ export interface ChatTurn {
   role: "user" | "assistant";
   /** Raw markdown+LaTeX as returned by the model. */
   content: string;
+  /**
+   * The model's thinking, while it is thinking.
+   *
+   * Transient: rendered so the wait is visibly progress, and cleared the moment
+   * the first real content arrives. Never persisted and never sent back to the
+   * provider — it is a display of work in progress, not part of the answer.
+   */
+  thinking?: string;
   phase: ChatPhase;
   /** Set when phase is `error`. */
   errorCode?: string;

@@ -277,6 +277,21 @@ pub struct ChatRequest {
 pub enum AiStreamEvent {
     Started,
     Delta { text: String },
+    /// The model's thinking, as it thinks it.
+    ///
+    /// Never part of the answer: the UI shows it while the model works so the
+    /// wait reads as work rather than as a hang, and drops it the moment the
+    /// answer starts. It is not appended to `Delta`, because a reader who
+    /// copied the answer would get the thinking with it.
+    Reasoning { text: String },
+    /// The model has been thinking for longer than the content deadline allows,
+    /// and has produced nothing.
+    ///
+    /// Not an error: the deadline exists to stop a stream that has died, and a
+    /// model that is visibly still thinking has not died. Emitted so the UI can
+    /// put the choice to the reader — keep waiting, or stop — instead of the
+    /// app deciding for them.
+    Stalled { waited_secs: u64 },
     Completed { finish_reason: Option<String> },
     Cancelled,
     Error { code: String, safe_message: String },

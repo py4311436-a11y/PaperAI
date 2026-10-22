@@ -82,6 +82,15 @@ const MODE_HINTS: Record<ContextMode, string> = {
 };
 
 /**
+ * How much of the thinking to show.
+ *
+ * A reasoning model can emit tens of thousands of characters. This is a
+ * progress display — enough to see that something is happening — not something
+ * to read, and not something to scroll back through afterwards.
+ */
+const THINKING_TAIL_CHARS = 600;
+
+/**
  * The keys PDF.js's annotation editor takes from a text field.
  *
  * The list is read off the pinned pdfjs-dist: its keyboard manager maps
@@ -145,6 +154,14 @@ export class ChatPanel {
   private liveTextNode: Text | null = null;
   /** The turn that owns `liveTextNode`. */
   private liveTextFor: string | null = null;
+  /**
+   * The thinking block currently on screen, if any.
+   *
+   * Held so the fast path can take it down. It is a sibling of the text node
+   * rather than part of it, so updating the text alone would leave the thinking
+   * on screen beside the answer it was a placeholder for.
+   */
+  private liveThinkingNode: HTMLElement | null = null;
   /** The chip row, rebuilt whenever the attachment list changes. */
   private attachRow!: HTMLElement;
   /** Warning about the current model and images, when there is one. */
@@ -826,13 +843,23 @@ render(turns: ChatTurn[], liveId: string | null): void {
       // The live turn, still streaming: only its text grew. Change the text
       // node and leave the DOM alone. Rebuilding it would detach the turn and
       // re-lay-out the transcript, once per token.
+      // Not while thinking: the thinking is a separate block that has to be
+      // rebuilt as it grows, and the text node alone cannot carry it. Once the
+      // answer has started the thinking is cleared and this path is taken for
+      // the rest of the answer, which is where the per-token cost matters.
       if (
         cached &&
+        !t.thinking &&
         this.liveTextNode &&
         this.liveTextFor === t.id &&
         t.role === "assistant" &&
         t.phase === "streaming"
       ) {
+        // The answer has started: the thinking goes, even on this path.
+        if (this.liveThinkingNode) {
+          this.liveThinkingNode.remove();
+          this.liveThinkingNode = null;
+        }
         this.liveTextNode.nodeValue = t.content;
         cached.sig = sig;
         continue;
@@ -865,12 +892,35 @@ render(turns: ChatTurn[], liveId: string | null): void {
   if (atBottom) this.transcript.scrollTop = this.transcript.scrollHeight;
 }
 
+  /**
+   * The model's thinking, as a live display.
+   *
+   * Shown so a two-minute wait reads as work rather than as a hang — the app
+   * knows the model is thinking, and the reader could not. Only the tail is
+   * kept: this is a progress display, not something to read or scroll back
+   * through, and a reasoning model can emit tens of thousands of characters.
+   */
+  private renderThinking(text: string): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "ai-thinking";
+    this.liveThinkingNode = box;
+    const label = document.createElement("div");
+    label.className = "ai-thinking-label";
+    label.textContent = "模型正在思考";
+    const body = document.createElement("div");
+    body.className = "ai-thinking-body";
+    body.textContent = text.slice(-THINKING_TAIL_CHARS);
+    box.append(label, body);
+    return box;
+  }
+
   private renderTurn(t: ChatTurn): HTMLElement {
-    // Any rebuild of the live turn invalidates the held text node.
+    // Any rebuild of the live turn invalidates the held nodes.
     if (t.id === this.liveTextFor) {
       this.liveTextNode = null;
       this.liveTextFor = null;
     }
+    this.liveThinkingNode = null;
     const wrap = document.createElement("div");
     wrap.className = `ai-turn ai-turn-${t.role}`;
     wrap.dataset.turnId = t.id;
@@ -923,6 +973,12 @@ render(turns: ChatTurn[], liveId: string | null): void {
     if (t.role === "assistant" && t.phase === "streaming" && t.id === this.liveTurnId) {
       // Plain text while streaming: cheap, and never half-parsed markup.
       body.classList.add("streaming");
+      // The thinking, while there is thinking and no answer yet. It disappears
+      // by itself when the answer starts, so what is on screen is always either
+      // "the model is working" or "here is the answer" — never both.
+      if (t.thinking?.trim() && !t.content) {
+        body.appendChild(this.renderThinking(t.thinking));
+      }
       // The text node is held so a later token can change it in place.
       const textNode = document.createTextNode(t.content);
       const caret = document.createElement("span");
@@ -1039,7 +1095,9 @@ function turnSignature(t: ChatTurn): string {
   // Attachments are part of the turn's identity: a cached node without its
   // thumbnails is a question the user can no longer read.
   const att = (t.attachments ?? []).map((a) => `${a.id}:${a.chars}`).join(",");
-  return `${t.phase}|${t.content.length}|${t.errorCode ?? ""}|${t.errorMessage ?? ""}|${t.contextLabel ?? ""}|${att}`;
+  // `thinking` is part of the identity: while the model thinks, the only thing
+  // changing is that, and a signature without it would never re-render.
+  return `${t.phase}|${t.content.length}|${t.thinking?.length ?? 0}|${t.errorCode ?? ""}|${t.errorMessage ?? ""}|${t.contextLabel ?? ""}|${att}`;
 }
 
 /** Turn a backend error code into something a person can act on. */

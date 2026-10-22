@@ -72,6 +72,14 @@ export interface ChatControllerDeps {
    * one line each and makes the next occurrence answerable.
    */
   log?: (message: string) => void;
+  /**
+   * The model has been thinking past the content deadline.
+   *
+   * The request is still open; this is the reader's decision to make, not the
+   * app's. Kept out of the turn state because it is a question about the
+   * request, not a fact about the answer.
+   */
+  onStalled?: (waitedSecs: number) => void;
   onChange: () => void;
   newId: () => string;
   now?: () => number;
@@ -406,8 +414,23 @@ export class ChatController {
             case "started":
               turn.phase = "streaming";
               break;
+            case "reasoning":
+              // Shown so a long wait reads as work, not as a hang. Cleared the
+              // moment real content arrives -- the thinking was a progress
+              // display, not part of the answer.
+              turn.phase = "streaming";
+              turn.thinking = (turn.thinking ?? "") + ev.text;
+              break;
+            case "stalled":
+              // Not an error and not the end of anything: the model has been
+              // thinking past the deadline and the request is still open. The
+              // shell puts the choice to the reader.
+              this.deps.onStalled?.(ev.waited_secs);
+              break;
             case "delta":
               turn.phase = "streaming";
+              // The answer has started, so the thinking has served its purpose.
+              turn.thinking = undefined;
               turn.content += ev.text;
               break;
             case "completed":

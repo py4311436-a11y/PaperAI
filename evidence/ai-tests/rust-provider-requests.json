@@ -440,6 +440,66 @@
     }
   },
   {
+    "test": "thinking_is_streamed_separately_from_the_answer",
+    "scenario": "reasoningThenAnswer",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "问题",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "thinking_past_the_deadline_asks_instead_of_cutting_off",
+    "scenario": "reasoningThenQuiet",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "问题",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
+    "test": "a_silent_stream_is_still_cut_off",
+    "scenario": "contentThenKeepalive",
+    "method": "POST",
+    "url": "/chat/completions",
+    "authorization": "Bearer <redacted:18chars>",
+    "contentType": "application/json",
+    "accept": "text/event-stream",
+    "sessionHeader": null,
+    "body": {
+      "messages": [
+        {
+          "content": "图9的纵坐标是什么",
+          "role": "user"
+        }
+      ],
+      "model": "mock-model",
+      "stream": true
+    }
+  },
+  {
     "test": "a_collected_answer_contains_every_delta",
     "scenario": "slow",
     "method": "POST",

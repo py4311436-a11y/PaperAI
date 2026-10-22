@@ -766,3 +766,135 @@ fn a_stalled_answer_after_content_is_cut_off() {
     );
     assert!(elapsed.as_secs() < 30, "must be bounded, took {elapsed:?}");
 }
+
+/// A model that thinks for a while and then answers.
+///
+/// The thinking used to be dropped on the floor, so a model that spent two
+/// minutes reasoning looked exactly like a model that had hung: the reader saw
+/// an empty answer and had no way to tell the two apart.
+#[test]
+fn thinking_is_streamed_separately_from_the_answer() {
+    need_mock!("reasoningThenAnswer");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "问题")]),
+        rx,
+        &sink,
+        Duration::from_secs(60),
+        Duration::from_secs(30),
+        Duration::from_secs(30),
+    ));
+
+    let mut reasoning = String::new();
+    let mut answer = String::new();
+    for ev in c.events() {
+        match ev {
+            AiStreamEvent::Reasoning { text } => reasoning.push_str(&text),
+            AiStreamEvent::Delta { text } => answer.push_str(&text),
+            _ => {}
+        }
+    }
+    assert!(reasoning.contains("推敲"), "the thinking must arrive: {reasoning:?}");
+    assert!(answer.contains("这是最终答案"), "the answer must arrive: {answer:?}");
+    // The thinking is not part of the answer: a reader who copies the answer
+    // must not get the model's reasoning with it.
+    assert!(!answer.contains("推敲"), "thinking leaked into the answer: {answer:?}");
+}
+
+/// Thinking past the content deadline puts the choice to the reader.
+///
+/// The deadline exists to catch streams that have died. A model that is visibly
+/// still thinking has not died, and the app was ending requests that were close
+/// to finishing.
+#[test]
+fn thinking_past_the_deadline_asks_instead_of_cutting_off() {
+    need_mock!("reasoningThenQuiet");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "问题")]),
+        rx,
+        &sink,
+        Duration::from_secs(60),
+        Duration::from_secs(1),
+        // Short, so the deadline arrives while the model is still thinking.
+        // Thinking resets this clock, so it is this number — not the first
+        // content ceiling — that has to be small for the stall to be reached.
+        Duration::from_secs(1),
+    ));
+
+    let events = c.events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AiStreamEvent::Reasoning { .. })),
+        "the thinking must be seen first: {events:?}"
+    );
+    let asked_at = events
+        .iter()
+        .position(|e| matches!(e, AiStreamEvent::Stalled { .. }));
+    assert!(
+        asked_at.is_some(),
+        "the reader must be asked rather than cut off: {events:?}"
+    );
+
+    // Asking is not the same as holding the request open for ever: this mock
+    // stops sending entirely, so the stream still ends without an answer. What
+    // matters is the *order* — the reader was asked first, and the app only gave
+    // up afterwards.
+    let gave_up_at = events
+        .iter()
+        .position(|e| matches!(e, AiStreamEvent::Error { .. }));
+    assert!(
+        gave_up_at.map(|i| i > asked_at.unwrap()).unwrap_or(true),
+        "the reader must be asked before the app gives up: {events:?}"
+    );
+}
+
+/// A stream that produces nothing at all is still cut off.
+///
+/// The grace above is for a model that is visibly working. With no output there
+/// is nothing to show the reader, so the deadline behaves as it always did —
+/// otherwise a dead connection would hold a request open for ever.
+#[test]
+fn a_silent_stream_is_still_cut_off() {
+    need_mock!("contentThenKeepalive");
+    let _key = with_key();
+    let c = Collector::default();
+    let sink = c.sink();
+    let provider = Arc::new(OpenAiCompatible::new().unwrap());
+    let (_tx, rx) = tokio::sync::watch::channel(false);
+
+    runtime().block_on(run_chat_with_deadlines(
+        provider,
+        call(vec![("user", "图9的纵坐标是什么")]),
+        rx,
+        &sink,
+        Duration::from_secs(60),
+        Duration::from_secs(30),
+        Duration::from_secs(2),
+    ));
+
+    let events = c.events();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AiStreamEvent::Stalled { .. })),
+        "there is no thinking to wait for: {events:?}"
+    );
+    assert!(
+        c.terminal().is_some(),
+        "and it must still end somehow: {events:?}"
+    );
+}

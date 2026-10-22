@@ -348,6 +348,12 @@ pub async fn run_chat_with_deadlines<S>(
     // keepalives keep a dead answer looking alive, and once content has arrived
     // the first-content ceiling no longer applies to anything.
     let mut content_deadline = tokio::time::Instant::now() + first_content_ceiling;
+    // Thinking is tracked separately from content: it proves the model is
+    // working, but it is never part of the answer.
+    let mut saw_reasoning = false;
+    let mut stall_waited = first_content_ceiling;
+    let mut stalling_grace_left = THINKING_STALL_GRACES;
+    let mut thinking_started: Option<std::time::Duration> = None;
 
     loop {
         tokio::select! {
@@ -361,6 +367,28 @@ pub async fn run_chat_with_deadlines<S>(
             }
 
             _ = tokio::time::sleep_until(content_deadline.into()) => {
+                // A model that is visibly still thinking has not died, and this
+                // deadline exists to catch streams that have. So when the model
+                // has been thinking and has produced nothing, the reader decides
+                // — keep waiting or stop — rather than the app deciding for them
+                // and throwing away work that is still in progress.
+                //
+                // Bounded: each extension is another `THINKING_GRACE`, so a
+                // provider that sends one reasoning fragment and then dies
+                // eventually still ends. The bound is long because a hard
+                // question can genuinely take minutes to think through.
+                if saw_reasoning && !saw_any && stalling_grace_left > 0 {
+                    stalling_grace_left -= 1;
+                    thinking_started = thinking_started.or(Some(stall_waited));
+                    stall_waited += first_content_ceiling;
+                    content_deadline =
+                        tokio::time::Instant::now() + first_content_ceiling + THINKING_GRACE;
+                    emit_logged(AiStreamEvent::Stalled {
+                        waited_secs: stall_waited.as_secs(),
+                    });
+                    continue;
+                }
+
                 // Two different stalls reach this branch, and the code has to
                 // match the message: no content at all is a first-token timeout,
                 // content that then stops is a mid-answer interruption. Sending
@@ -380,6 +408,12 @@ pub async fn run_chat_with_deadlines<S>(
                              这不是连接断开，而是服务端没有再往下输出。可以重试，\
                              或改用更小的上下文范围。",
                             no_progress_ceiling.as_secs()
+                        )
+                    } else if let Some(thought_for) = thinking_started {
+                        format!(
+                            "模型思考了约 {} 秒后仍未给出答案，连接已无进展。\
+                             可以重试，或改用更小的上下文范围。",
+                            thought_for.as_secs()
                         )
                     } else {
                         format!(
@@ -450,7 +484,15 @@ pub async fn run_chat_with_deadlines<S>(
                             // pass through here without resetting the clock.
                             if let SseEvent::Chunk(c) = &ev {
                                 let text = c.content.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
-                                if text || !c.tool_calls.is_empty() {
+                                // Thinking counts as progress. A model that is
+                                // visibly working must not be cut off by a
+                                // deadline that exists to catch dead streams.
+                                let thinking =
+                                    c.reasoning.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+                                if thinking {
+                                    saw_reasoning = true;
+                                }
+                                if text || thinking || !c.tool_calls.is_empty() {
                                     content_deadline =
                                         tokio::time::Instant::now() + no_progress_ceiling;
                                 }
@@ -635,6 +677,13 @@ fn apply<S: Fn(AiStreamEvent)>(
             false
         }
         SseEvent::Chunk(c) => {
+            // Thinking first: a chunk may carry reasoning and content together,
+            // and the thinking is what the reader is waiting on.
+            if let Some(text) = c.reasoning.clone() {
+                if !text.is_empty() {
+                    sink(AiStreamEvent::Reasoning { text });
+                }
+            }
             if let Some(msg) = c.error_message {
                 sink(AiStreamEvent::Error {
                     code: c.error_code.unwrap_or_else(|| codes::AI_PROVIDER_ERROR.to_string()),
@@ -668,7 +717,11 @@ fn apply<S: Fn(AiStreamEvent)>(
 /// that made a seven-minute stall undiagnosable in the first place.
 fn end_kind(ev: &AiStreamEvent) -> Option<String> {
     match ev {
-        AiStreamEvent::Started | AiStreamEvent::Delta { .. } => None,
+        // Not terminal: the request is still going.
+        AiStreamEvent::Started
+        | AiStreamEvent::Delta { .. }
+        | AiStreamEvent::Reasoning { .. }
+        | AiStreamEvent::Stalled { .. } => None,
         AiStreamEvent::Completed { finish_reason } => Some(format!(
             "completed finish={}",
             finish_reason.as_deref().unwrap_or("-")
@@ -678,6 +731,19 @@ fn end_kind(ev: &AiStreamEvent) -> Option<String> {
         AiStreamEvent::ToolCalls { calls } => Some(format!("tool_calls n={}", calls.len())),
     }
 }
+
+/// How much longer to wait when the reader has been told the model is thinking.
+///
+/// The first content ceiling is a judgement about dead streams; a model
+/// mid-thought is not a dead stream, and the reader has just been asked whether
+/// to keep waiting. This is how much they get per "yes".
+const THINKING_GRACE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// How many times that grace can be extended.
+///
+/// Bounded, so a provider that sends one reasoning fragment and then goes quiet
+/// still ends the request rather than holding it open indefinitely.
+const THINKING_STALL_GRACES: usize = 3;
 
 /// The event that ends a stream, chosen by whether the model asked for a tool.
 ///

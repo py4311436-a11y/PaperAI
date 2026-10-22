@@ -451,3 +451,64 @@ test("a turn that is not the live one is not touched by the fast path", () => {
   const after = panel.root.querySelector(".ai-turn-assistant");
   assert.ok(after.textContent.includes("改过的"), after.textContent);
 });
+
+/* ------------- the model's thinking, shown while it works and then dropped -- */
+
+/**
+ * A model that spent two minutes reasoning looked exactly like a model that had
+ * hung: the reader saw an empty answer and had no way to tell the two apart.
+ *
+ * The app knew the difference — the provider streams the thinking separately —
+ * and threw it away. Now it is shown while it lasts and dropped the moment the
+ * answer starts, so the screen is always either "working" or "here is the
+ * answer", never both.
+ */
+const thinkingTurn = (thinking, content = "") => ({
+  id: "t2",
+  role: "assistant",
+  content,
+  thinking: thinking || undefined,
+  phase: "streaming",
+  createdAt: 1,
+});
+
+test("the thinking is shown while there is no answer yet", () => {
+  const { panel } = panelWithSpy();
+  panel.render([userTurn, thinkingTurn("先确认问题要什么。")], "t2");
+  const node = panel.root.querySelector(".ai-thinking");
+  assert.ok(node, "the reader must see that the model is working");
+  assert.ok(node.textContent.includes("先确认问题要什么"), node.textContent);
+});
+
+test("the thinking disappears the moment the answer starts", () => {
+  const { panel } = panelWithSpy();
+  panel.render([userTurn, thinkingTurn("先确认问题要什么。")], "t2");
+  assert.ok(panel.root.querySelector(".ai-thinking"), "it must be there first");
+
+  panel.render([userTurn, thinkingTurn(undefined, "这是答案。")], "t2");
+  assert.equal(
+    panel.root.querySelector(".ai-thinking"),
+    null,
+    "the thinking must not stay on screen beside the answer"
+  );
+  assert.ok(panel.root.textContent.includes("这是答案。"));
+});
+
+test("the thinking is never part of the answer text", () => {
+  // A reader who copies the answer must not get the model's reasoning with it.
+  const { panel } = panelWithSpy();
+  panel.render([userTurn, thinkingTurn(undefined, "这是答案。")], "t2");
+  const turn = panel.root.querySelector(".ai-turn-assistant");
+  assert.ok(!turn.textContent.includes("先确认问题要什么"), turn.textContent);
+});
+
+test("only the tail of a long thinking is shown", () => {
+  // A reasoning model can emit tens of thousands of characters. This is a
+  // progress signal, not something to read.
+  const { panel } = panelWithSpy();
+  const long = "甲".repeat(5000) + "结尾在这里";
+  panel.render([userTurn, thinkingTurn(long)], "t2");
+  const node = panel.root.querySelector(".ai-thinking-body");
+  assert.ok(node.textContent.includes("结尾在这里"), "the newest part must be visible");
+  assert.ok(node.textContent.length < 1200, `shown ${node.textContent.length} chars`);
+});

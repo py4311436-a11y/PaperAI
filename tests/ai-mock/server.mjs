@@ -223,6 +223,47 @@ const scenarios = {
    * timeout cannot catch it (bytes keep arriving) and the first-content ceiling no
    * longer applies (content already came).
    */
+  // The model's thinking, then nothing: the case the 180-second deadline used
+  // to end by throwing the work away.
+  reasoningThenQuiet: (model) => ({
+    status: 200,
+    slow: true,
+    makeBuffers: () => {
+      const out = [];
+      for (let i = 0; i < 6; i++) {
+        out.push(
+          Buffer.from(
+            sseChunk(model, { reasoning_content: `思考中 ${i}：先确认问题要什么。` })
+          )
+        );
+      }
+      for (let i = 0; i < 40; i++) {
+        out.push(Buffer.from(": keepalive\n\n"));
+        out.push(Buffer.from(sseChunk(model, { role: "assistant" })));
+      }
+      return out;
+    },
+    gapMs: 300,
+  }),
+
+  // Thinking, then an answer: the normal case for a reasoning model, and the
+  // one that must look ordinary to the reader.
+  reasoningThenAnswer: (model) => ({
+    status: 200,
+    slow: true,
+    makeBuffers: () => {
+      const out = [];
+      for (let i = 0; i < 4; i++) {
+        out.push(Buffer.from(sseChunk(model, { reasoning_content: `推敲 ${i}。` })));
+      }
+      out.push(Buffer.from(sseChunk(model, { content: "这是最终答案。" })));
+      out.push(Buffer.from(sseChunk(model, { finish_reason: "stop" })));
+      out.push(Buffer.from("data: [DONE]\n\n"));
+      return out;
+    },
+    gapMs: 20,
+  }),
+
   contentThenKeepalive: (model) => ({
     status: 200,
     slow: true,
